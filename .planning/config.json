@@ -1,0 +1,7 @@
+{
+  "workflow": {
+    "commit_docs": true,
+    "parallelization": true,
+    "subagent_timeout": 300000
+  }
+}
