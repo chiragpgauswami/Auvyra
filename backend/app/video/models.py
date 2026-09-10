@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from enum import Enum
-from typing import Callable, Any
+from typing import Callable, Any, Optional
 
 class VideoAspect(str, Enum):
     landscape = "16:9"
@@ -25,6 +25,9 @@ class MediaItem(BaseModel):
     width: int = 0
     height: int = 0
     search_term: str = ""
+    scene_index: Optional[int] = None
+    crop_mode: Optional[str] = "cover"
+    file_size: Optional[int] = 0
 
 class TTSResult(BaseModel):
     audio_path: str

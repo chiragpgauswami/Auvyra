@@ -22,3 +22,4 @@ async def test_ollama_unreachable_exception():
     
     assert exc_info.value.code == "OLLAMA_UNAVAILABLE"
     assert "unavailable" in exc_info.value.message.lower()
+

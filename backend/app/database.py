@@ -56,6 +56,9 @@ class MongoDBManager:
             
             # strategy_insights.channel_id
             await self.db.strategy_insights.create_index("channel_id")
+
+            # channel_brains: compound (user_id, channel_id) (unique)
+            await self.db.channel_brains.create_index([("user_id", pymongo.ASCENDING), ("channel_id", pymongo.ASCENDING)], unique=True)
             
         except Exception as e:
             logger.error(f"Error creating indexes: {e}")

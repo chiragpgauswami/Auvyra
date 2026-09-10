@@ -30,12 +30,15 @@ $$\text{Research} \longrightarrow \text{Create} \longrightarrow \text{Publish} \
 ## Quickstart Setup
 
 ### 1. Clone & Configure Environment
+
 ```bash
 cp .env.example .env
 ```
+
 Edit `.env` as needed. If `ENCRYPTION_KEY` is not set or invalid, Auvyra automatically generates a secure Fernet encryption key on startup.
 
 ### 2. Python Backend Virtual Environment
+
 ```bash
 # Using uv (recommended)
 uv venv .venv
@@ -49,48 +52,63 @@ pip install -e .
 ```
 
 ### 3. Start MongoDB
+
 ```bash
 # macOS Homebrew
 brew services start mongodb-community
 ```
 
-### 4. Run Automated QA Tests
-```bash
-# Run the complete unit and integration test suite
-pytest -v tests/
+### 4. Run Verification Suite & Environment Doctor
 
-# Run the full end-to-end creator journey test
-python scripts/test_e2e.py
+```bash
+# Single-command full verification (Doctor + Pytest + Frontend Typecheck & Build)
+./scripts/verify.sh
+
+# Run diagnostic environment doctor
+python3 scripts/doctor.py
+
+# Run live production acceptance test
+python3 scripts/production_acceptance.py
 ```
 
 ### 5. Launch the FastAPI Backend
+
 ```bash
 source .venv/bin/activate
 uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
 Interactive API documentation will be accessible at:
+
 - **Swagger UI:** [http://localhost:8000/docs](http://localhost:8000/docs)
 - **ReDoc:** [http://localhost:8000/redoc](http://localhost:8000/redoc)
 - **Health Check:** [http://localhost:8000/api/health](http://localhost:8000/api/health)
 
 ### 6. Launch Background Workers
+
 In a separate terminal:
+
 ```bash
 source .venv/bin/activate
 python -m backend.app.workers.runner
 ```
+
 This starts the background job processing loop with automatic stale job recovery (recovering any tasks interrupted by worker crashes).
 
 ### 7. Launch Frontend Development Server
+
 In a separate terminal:
+
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
+
 Open [http://localhost:5173](http://localhost:5173) in your browser.
 
 To build the frontend for production:
+
 ```bash
 cd frontend
 npm run build
@@ -98,14 +116,22 @@ npm run build
 
 ---
 
-## Verification & QA Status
+## Zero-Mock Production Certification
 
-Auvyra has been audited and verified:
-- **Automated Tests:** 17/17 passing (`tests/unit` and `tests/integration`)
-- **End-to-End Pipeline:** 19/19 passing (`scripts/test_e2e.py`)
-- **Frontend Compilation:** Clean build with 0 TypeScript errors
-- Detailed test matrix: [`docs/TESTING.md`](docs/TESTING.md)
-- Complete QA report: [`docs/TEST_REPORT.md`](docs/TEST_REPORT.md)
+Auvyra Phase 1 is **Zero-Mock Certified**:
+
+- **Automated Tests:** 19/19 passing (`tests/unit` and `tests/integration`)
+- **Single Verification:** `./scripts/verify.sh` passes cleanly (Doctor, Pytest, Frontend Build)
+- **System Doctor:** `scripts/doctor.py` verifies all system dependencies (Python, Node, FFmpeg, Mongo, Ollama, Edge TTS)
+- **Zero Mock Policy:** Replaced all hardcoded AI filler and mock YouTube IDs with genuine inference, real FFmpeg rendering, and explicit `GOOGLE_OAUTH_NOT_CONFIGURED` blockers when external credentials are absent.
+
+### Documentation Directory
+
+- **Setup Guide & Google OAuth:** [`docs/SETUP_REQUIRED.md`](docs/SETUP_REQUIRED.md)
+- **Production Readiness Report:** [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md)
+- **REST API Specification:** [`docs/API.md`](docs/API.md)
+- **Environment Reference:** [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md)
+- **System Architecture:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
 ---
 

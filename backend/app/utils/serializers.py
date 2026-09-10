@@ -32,3 +32,4 @@ def serialize_doc(doc: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 def serialize_docs(docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Convert a list of MongoDB documents into JSON-safe dictionaries."""
     return [serialize_doc(doc) for doc in docs if doc is not None]
+

@@ -12,7 +12,7 @@ def get_ffmpeg_binary() -> str:
 
 def ffmpeg_encoder_exists(codec: str) -> bool:
     try:
-        res = subprocess.run([get_ffmpeg_binary(), "-encoders"], capture_output=True, text=True)
+        res = subprocess.run([get_ffmpeg_binary(), "-encoders"], capture_output=True, text=True, timeout=10)
         return codec in res.stdout
     except Exception:
         return False
@@ -43,7 +43,7 @@ def concat_clips_with_ffmpeg(clip_files: list[str], output: str, threads: int = 
         get_ffmpeg_binary(), "-y", "-f", "concat", "-safe", "0",
         "-i", list_file, "-c", "copy", output
     ]
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, timeout=300)
     os.remove(list_file)
     return output
 
@@ -53,7 +53,7 @@ def probe_video_info(file_path: str) -> dict:
             shutil.which("ffprobe") or "ffprobe",
             "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", file_path
         ]
-        res = subprocess.run(cmd, capture_output=True, text=True)
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         data = json.loads(res.stdout)
         
         duration = float(data.get("format", {}).get("duration", 0))
@@ -61,12 +61,22 @@ def probe_video_info(file_path: str) -> dict:
         
         width = 0
         height = 0
+        codec = ""
+        fps = 0.0
         for stream in data.get("streams", []):
             if stream.get("codec_type") == "video":
                 width = int(stream.get("width", 0))
                 height = int(stream.get("height", 0))
+                codec = stream.get("codec_name", "")
+                r_fps = stream.get("r_frame_rate", "")
+                if "/" in r_fps:
+                    num, den = r_fps.split("/", 1)
+                    if float(den or 0) > 0:
+                        fps = float(num) / float(den)
+                elif r_fps:
+                    fps = float(r_fps)
                 break
                 
-        return {"duration": duration, "size": size, "width": width, "height": height}
+        return {"duration": duration, "size": size, "width": width, "height": height, "codec": codec, "fps": fps}
     except Exception:
         return {}

@@ -58,7 +58,7 @@ async def run_test():
         "-show_streams", "-select_streams", "a",
         "-loglevel", "error"
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     assert len(res.stdout.strip()) > 0, "No audio stream found in output video!"
     logger.success("✓ 4. Audio stream exists and is verified")
     

@@ -14,6 +14,10 @@ class ChannelResponse(BaseModel):
     name: str
     handle: str | None = None
     description: str = ""
+    thumbnail_url: str | None = None
+    subscriber_count: int = 0
+    video_count: int = 0
+    view_count: int = 0
     status: str = "connected"  # connected, disconnected, pending
     autopilot_enabled: bool = False
     approval_required: bool = True

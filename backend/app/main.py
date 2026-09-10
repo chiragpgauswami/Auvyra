@@ -23,6 +23,7 @@ from backend.app.api.videos import router as videos_router
 from backend.app.api.publishing import router as publishing_router
 from backend.app.api.analytics import router as analytics_router
 from backend.app.api.jobs import router as jobs_router
+from backend.app.api.autopilot import router as autopilot_router
 
 settings = get_settings()
 
@@ -61,6 +62,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+import uuid
+
+# Security Headers & Request ID Middleware
+@app.middleware("http")
+async def security_and_request_id_middleware(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    return response
+
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
@@ -71,30 +85,76 @@ app.add_middleware(
 )
 
 
+def sanitize_validation_errors(errors: list) -> list:
+    """Sanitize validation error dictionaries to prevent non-serializable objects (such as raw bytes)
+    from crashing JSON serialization and redact sensitive fields (passwords, secrets, tokens)."""
+    sanitized = []
+    for err in errors:
+        if not isinstance(err, dict):
+            sanitized.append({"msg": str(err), "type": "type_error"})
+            continue
+
+        loc = err.get("loc", ())
+        loc_str = [str(item) for item in loc]
+        is_sensitive = any(
+            any(term in str(item).lower() for term in ("password", "token", "secret", "key", "authorization"))
+            for item in loc
+        )
+
+        clean_item = {
+            "loc": loc_str,
+            "msg": err.get("msg", "Validation error"),
+            "type": err.get("type", "value_error")
+        }
+
+        if is_sensitive:
+            clean_item["input"] = "[REDACTED]"
+        elif "input" in err:
+            val = err["input"]
+            if isinstance(val, (str, int, float, bool, type(None))):
+                clean_item["input"] = val
+            elif isinstance(val, bytes):
+                clean_item["input"] = f"<bytes len={len(val)}>"
+            elif isinstance(val, (list, tuple)):
+                clean_item["input"] = f"<{type(val).__name__} len={len(val)}>"
+            elif isinstance(val, dict):
+                safe_keys = [k for k in val.keys() if not any(term in str(k).lower() for term in ("password", "token", "secret"))]
+                clean_item["input"] = f"<dict keys={safe_keys}>"
+            else:
+                clean_item["input"] = f"<{type(val).__name__}>"
+
+        sanitized.append(clean_item)
+    return sanitized
+
+
 # ==============================================================================
 # Central Exception Handlers (Section 36 - Structured Error Standard)
 # ==============================================================================
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    """Format HTTPExceptions into structured error envelopes."""
+    """Format HTTPExceptions into structured error envelopes with request_id."""
+    req_id = getattr(request.state, "request_id", str(uuid.uuid4()))
     detail = exc.detail
     if isinstance(detail, dict) and "code" in detail:
         error_body = {
             "code": detail.get("code", "HTTP_ERROR"),
             "message": detail.get("message", "An error occurred"),
-            "details": detail.get("details", None)
+            "details": detail.get("details", None),
+            "request_id": req_id
         }
     elif isinstance(detail, str):
         error_body = {
             "code": f"HTTP_{exc.status_code}",
             "message": detail,
-            "details": None
+            "details": None,
+            "request_id": req_id
         }
     else:
         error_body = {
             "code": f"HTTP_{exc.status_code}",
             "message": "An error occurred",
-            "details": detail
+            "details": detail,
+            "request_id": req_id
         }
 
     return JSONResponse(
@@ -106,15 +166,18 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Format request validation errors cleanly without stack traces."""
-    logger.warning(f"Request validation error on {request.url.path}: {exc.errors()}")
+    """Format request validation errors cleanly without stack traces or raw byte crashes."""
+    req_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    clean_details = sanitize_validation_errors(exc.errors())
+    logger.warning(f"Request validation error on {request.url.path} [req_id={req_id}]: {clean_details}")
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
             "error": {
                 "code": "VALIDATION_ERROR",
                 "message": "Invalid request parameters or payload",
-                "details": exc.errors()
+                "details": clean_details,
+                "request_id": req_id
             }
         }
     )
@@ -123,14 +186,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """Catch-all for unhandled exceptions. Never leak python tracebacks to client."""
-    logger.exception(f"Unhandled server exception on {request.method} {request.url.path}: {exc}")
+    req_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    logger.exception(f"Unhandled server exception on {request.method} {request.url.path} [req_id={req_id}]: {exc}")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "error": {
                 "code": "INTERNAL_SERVER_ERROR",
                 "message": "An unexpected internal server error occurred",
-                "details": None
+                "details": None,
+                "request_id": req_id
             }
         }
     )
@@ -171,8 +236,8 @@ async def check_ollama_health() -> Dict[str, Any]:
 
 
 def check_video_health() -> Dict[str, Any]:
-    ffmpeg_bin = settings.FFMPEG_BINARY or shutil.which("ffmpeg")
-    ffprobe_bin = settings.FFPROBE_BINARY or shutil.which("ffprobe")
+    ffmpeg_bin = getattr(settings, "FFMPEG_PATH", None) or getattr(settings, "FFMPEG_BINARY", None) or shutil.which("ffmpeg")
+    ffprobe_bin = getattr(settings, "FFPROBE_BINARY", None) or shutil.which("ffprobe")
     
     status_val = "ok" if (ffmpeg_bin and ffprobe_bin) else "unavailable"
     return {
@@ -224,8 +289,11 @@ async def health_video():
     return check_video_health()
 
 
+import os
+from fastapi.staticfiles import StaticFiles
+
 # ==============================================================================
-# Mount API Routers
+# Mount API Routers & Static Media
 # ==============================================================================
 app.include_router(auth_router)
 app.include_router(channels_router)
@@ -235,3 +303,9 @@ app.include_router(videos_router)
 app.include_router(publishing_router)
 app.include_router(analytics_router)
 app.include_router(jobs_router)
+app.include_router(autopilot_router)
+
+# Mount local media directory for direct asset access
+os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
+app.mount("/media", StaticFiles(directory=settings.MEDIA_ROOT), name="media")
+

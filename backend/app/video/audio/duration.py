@@ -16,7 +16,7 @@ def get_audio_duration(file_path: str) -> float:
             "-of", "default=noprint_wrappers=1:nokey=1",
             file_path
         ]
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True, timeout=30)
         return float(result.stdout.strip())
     except Exception:
         # Fallback to moviepy

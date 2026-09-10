@@ -18,8 +18,167 @@ class ChannelUpdate(BaseModel):
 class AutopilotToggle(BaseModel):
     enabled: bool
 
+from backend.app.config import get_settings
+from backend.app.youtube.scopes import REQUIRED_YOUTUBE_SCOPES, verify_granted_scopes
+from backend.app.youtube.client import YouTubeClient, YouTubeAPIError
+
 def get_channel_service(db = Depends(get_db)):
     return ChannelService(db)
+
+@router.get("/youtube/status")
+async def get_youtube_connection_status(
+    user: dict = Depends(require_auth),
+    db = Depends(get_db)
+):
+    """Retrieve Google OAuth and YouTube integration status for the authenticated user."""
+    user_id = str(user["_id"])
+    oauth = await db.oauth_accounts.find_one({"user_id": user_id, "provider": "google"})
+    if not oauth:
+        return {
+            "connected": False,
+            "status": "not_connected",
+            "message": "YouTube account is not connected. Click Connect YouTube to link your channel."
+        }
+
+    granted_scopes = oauth.get("granted_scopes", [])
+    audit = verify_granted_scopes(granted_scopes)
+    
+    # Find linked channel
+    channel = await db.channels.find_one({"user_id": user_id, "youtube_channel_id": {"$exists": True, "$ne": None}})
+    
+    if audit["needs_reauthorization"]:
+        return {
+            "connected": True,
+            "status": "reauthorization_required",
+            "granted_scopes": granted_scopes,
+            "missing_scopes": audit["missing_scopes"],
+            "needs_reauthorization": True,
+            "channel_id": str(channel["_id"]) if channel else None,
+            "youtube_channel_id": channel.get("youtube_channel_id") if channel else None,
+            "message": "YouTube permissions are incomplete. Please reconnect your YouTube account."
+        }
+
+    return {
+        "connected": True,
+        "status": "connected",
+        "granted_scopes": granted_scopes,
+        "missing_scopes": [],
+        "needs_reauthorization": False,
+        "channel": {
+            "id": str(channel["_id"]),
+            "name": channel.get("name"),
+            "handle": channel.get("handle"),
+            "youtube_channel_id": channel.get("youtube_channel_id"),
+            "thumbnail_url": channel.get("thumbnail_url"),
+            "subscriber_count": channel.get("subscriber_count", 0),
+            "video_count": channel.get("video_count", 0),
+            "view_count": channel.get("view_count", 0),
+            "status": channel.get("status", "connected")
+        } if channel else None,
+        "message": "YouTube account connected and verified."
+    }
+
+@router.post("/youtube/sync")
+async def sync_youtube_channel(
+    user: dict = Depends(require_auth),
+    db = Depends(get_db)
+):
+    """Trigger live YouTube API lookup to refresh channel details from YouTube Data API v3."""
+    user_id = str(user["_id"])
+    oauth = await db.oauth_accounts.find_one({"user_id": user_id, "provider": "google"})
+    if not oauth:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "NOT_CONNECTED", "message": "Google OAuth is not connected. Please connect YouTube first."}
+        )
+
+    granted_scopes = oauth.get("granted_scopes", [])
+    has_read = (
+        "https://www.googleapis.com/auth/youtube.readonly" in granted_scopes
+        or "https://www.googleapis.com/auth/youtube" in granted_scopes
+    )
+    if not has_read:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "YOUTUBE_INSUFFICIENT_SCOPES",
+                "message": "Your YouTube permissions are incomplete (missing https://www.googleapis.com/auth/youtube.readonly). Please reconnect YouTube."
+            }
+        )
+
+    from backend.app.youtube.client import get_youtube_client_for_user
+    try:
+        yt_client = await get_youtube_client_for_user(user_id, db)
+        ch_info = await yt_client.get_my_channel()
+    except YouTubeAPIError as e:
+        if e.error_code == "NO_CHANNEL":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NO_CHANNEL", "message": "No YouTube channel was found for this Google account."}
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": e.error_code, "message": e.message}
+        )
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    yt_id = ch_info["youtube_channel_id"]
+    existing = await db.channels.find_one({"youtube_channel_id": yt_id})
+    if not existing:
+        res = await db.channels.insert_one({
+            "user_id": user_id,
+            "name": ch_info["name"],
+            "description": ch_info.get("description", ""),
+            "youtube_channel_id": yt_id,
+            "handle": ch_info.get("handle"),
+            "thumbnail_url": ch_info.get("thumbnail_url"),
+            "subscriber_count": ch_info.get("subscriber_count", 0),
+            "video_count": ch_info.get("video_count", 0),
+            "view_count": ch_info.get("view_count", 0),
+            "status": "connected",
+            "autopilot_enabled": False,
+            "approval_required": True,
+            "created_at": now,
+            "updated_at": now
+        })
+        ch_doc = await db.channels.find_one({"_id": res.inserted_id})
+    else:
+        await db.channels.update_one(
+            {"_id": existing["_id"]},
+            {"$set": {
+                "user_id": user_id,
+                "status": "connected",
+                "name": ch_info["name"],
+                "handle": ch_info.get("handle") or existing.get("handle"),
+                "thumbnail_url": ch_info.get("thumbnail_url") or existing.get("thumbnail_url"),
+                "subscriber_count": ch_info.get("subscriber_count", existing.get("subscriber_count", 0)),
+                "video_count": ch_info.get("video_count", existing.get("video_count", 0)),
+                "view_count": ch_info.get("view_count", existing.get("view_count", 0)),
+                "updated_at": now
+            }}
+        )
+        ch_doc = await db.channels.find_one({"_id": existing["_id"]})
+
+    from backend.app.utils.serializers import serialize_doc
+    return serialize_doc(ch_doc)
+
+@router.delete("/youtube/disconnect")
+async def disconnect_youtube_channel(
+    user: dict = Depends(require_auth),
+    db = Depends(get_db)
+):
+    """Safely disconnect YouTube channel and remove OAuth tokens for the authenticated user."""
+    user_id = str(user["_id"])
+    del_res = await db.oauth_accounts.delete_many({"user_id": user_id, "provider": "google"})
+    await db.channels.update_many(
+        {"user_id": user_id, "youtube_channel_id": {"$exists": True, "$ne": None}},
+        {"$set": {"status": "disconnected"}}
+    )
+    return {
+        "success": True,
+        "message": "YouTube channel disconnected successfully. You can now re-authorize."
+    }
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def create_channel(data: ChannelCreate, user: dict = Depends(require_auth), service: ChannelService = Depends(get_channel_service)):
@@ -63,3 +222,46 @@ async def toggle_autopilot(channel_id: str, data: AutopilotToggle, user: dict = 
     if not updated:
         raise HTTPException(status_code=404, detail="Channel not found")
     return {"status": "success"}
+
+from backend.app.models.brain import ChannelOnboardingRequest
+
+@router.post("/{channel_id}/onboard")
+async def onboard_channel(
+    channel_id: str,
+    data: ChannelOnboardingRequest,
+    user: dict = Depends(require_auth),
+    service: ChannelService = Depends(get_channel_service)
+):
+    """Execute AI strategic onboarding for a channel, establishing its Channel Brain."""
+    try:
+        return await service.onboard_channel(str(user["_id"]), channel_id, data.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Onboarding failed: {str(e)}")
+
+@router.get("/{channel_id}/brain")
+async def get_channel_brain(
+    channel_id: str,
+    user: dict = Depends(require_auth),
+    service: ChannelService = Depends(get_channel_service)
+):
+    """Fetch isolated Channel Brain strategy and learned rules."""
+    brain = await service.get_brain(str(user["_id"]), channel_id)
+    if not brain:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel Brain not found. Please complete channel onboarding.")
+    return brain
+
+@router.post("/{channel_id}/brain/rebuild")
+async def rebuild_channel_brain(
+    channel_id: str,
+    user: dict = Depends(require_auth),
+    service: ChannelService = Depends(get_channel_service)
+):
+    """Rebuild channel brain strategy based on current niche and past learnings."""
+    try:
+        return await service.rebuild_brain(str(user["_id"]), channel_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Brain rebuild failed: {str(e)}")

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from enum import Enum
 from datetime import datetime
 from typing import List, Dict, Optional, Any
@@ -26,14 +26,42 @@ class ContentIdea(BaseModel):
     updated_at: datetime
 
 class ResearchOpportunity(BaseModel):
-    topic: str
-    why_now: str
-    evidence: str
-    content_gap: str
-    recommended_angle: str
+    topic: str = "Research Topic"
+    content_pillar: str = ""
+    target_audience: str = ""
+    why_now: Any = ""
+    evidence: Any = ""
+    content_gap: Any = ""
+    recommended_angle: Any = ""
     hooks: list[str] = []
     sources: list[str] = []
+    opportunity_score: float = 85.0
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def resolve_fields(cls, data: Any) -> Any:
+        import json
+        if isinstance(data, dict):
+            if not data.get("topic"):
+                data["topic"] = data.get("title") or "Research Topic"
+            for field in ["why_now", "evidence", "content_gap", "recommended_angle"]:
+                val = data.get(field)
+                if isinstance(val, (dict, list)):
+                    data[field] = json.dumps(val)
+                elif val is not None:
+                    data[field] = str(val)
+                else:
+                    data[field] = ""
+            for list_field in ["hooks", "sources"]:
+                val = data.get(list_field)
+                if isinstance(val, str):
+                    data[list_field] = [val]
+                elif isinstance(val, list):
+                    data[list_field] = [str(x) for x in val]
+                else:
+                    data[list_field] = []
+        return data
 
 class StructuredScript(BaseModel):
     title: str = ""
@@ -41,8 +69,16 @@ class StructuredScript(BaseModel):
     hook_scores: dict[str, float] = {}
     selected_hook: str = ""
     outline: list[str] = []
-    final_script: str
+    final_script: str = ""
     cta: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def resolve_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("final_script"):
+                data["final_script"] = data.get("script") or data.get("script_text") or ""
+        return data
 
 class Script(BaseModel):
     id: str = Field(alias="_id")

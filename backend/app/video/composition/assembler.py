@@ -1,6 +1,6 @@
 import os
 import math
-from typing import List
+from typing import List, Any, Optional, Dict
 from moviepy import VideoFileClip, CompositeVideoClip, ColorClip
 from ..models import VideoAspect
 from ..rendering.ffmpeg import concat_clips_with_ffmpeg
@@ -35,6 +35,8 @@ def fit_clip_to_canvas(clip, target_width: int, target_height: int, fit_mode: st
         bg = ColorClip(size=(target_width, target_height), color=(0, 0, 0)).with_duration(clip.duration)
         return CompositeVideoClip([bg, resized_clip], size=(target_width, target_height)).with_duration(clip.duration)
 
+from ..validation import validate_media_asset
+
 class VideoAssembler:
     def assemble_clips(self, video_paths: List[str], audio_duration: float, 
                        aspect_ratio: VideoAspect, output_path: str, 
@@ -43,13 +45,25 @@ class VideoAssembler:
         target_width, target_height = aspect_ratio.to_resolution()
         required_duration = audio_duration + 0.5
         
+        # Filter and validate all incoming video paths
+        valid_video_paths = []
+        for v in video_paths:
+            is_valid, msg = validate_media_asset(v)
+            if is_valid:
+                valid_video_paths.append(v)
+            else:
+                print(f"Skipping invalid source clip {v}: {msg}")
+                
+        if not valid_video_paths:
+            raise RuntimeError(f"No valid video source assets available to assemble video. Input paths were: {video_paths}")
+
         temp_dir = os.path.dirname(output_path)
         processed_paths = []
         current_duration = 0.0
         
         idx = 0
         while current_duration < required_duration:
-            for v_path in video_paths:
+            for v_path in valid_video_paths:
                 if current_duration >= required_duration:
                     break
                     
@@ -79,3 +93,85 @@ class VideoAssembler:
                     pass
                 
         return output_path
+
+    def assemble_storyboard_scenes(
+        self,
+        storyboard_scenes: List[Any],
+        media_items: List[Any],
+        audio_duration: float,
+        aspect_ratio: VideoAspect,
+        output_path: str,
+        fit_mode: str = "cover"
+    ) -> str:
+        """Assembles scene-by-scene stock footage aligned to the storyboard timeline."""
+        target_width, target_height = aspect_ratio.to_resolution()
+        required_duration = audio_duration + 0.5
+        temp_dir = os.path.dirname(output_path)
+        processed_paths = []
+        current_duration = 0.0
+
+        # Map scene_index to media items
+        media_by_scene = {}
+        for m in media_items:
+            path = getattr(m, "local_path", str(m))
+            is_valid, _ = validate_media_asset(path)
+            if is_valid:
+                s_idx = getattr(m, "scene_index", None)
+                if s_idx is not None:
+                    media_by_scene[s_idx] = path
+
+        # Fallback pool if a scene doesn't have an exact match
+        valid_pool = list(media_by_scene.values())
+        if not valid_pool:
+            for m in media_items:
+                path = getattr(m, "local_path", str(m))
+                is_valid, _ = validate_media_asset(path)
+                if is_valid:
+                    valid_pool.append(path)
+
+        if not valid_pool:
+            raise RuntimeError("No valid video clips available to assemble storyboard scenes.")
+
+        scene_idx = 0
+        loop_guard = 0
+        while current_duration < required_duration and loop_guard < 50:
+            loop_guard += 1
+            for s in storyboard_scenes:
+                if current_duration >= required_duration:
+                    break
+
+                s_id = getattr(s, "scene_index", scene_idx + 1)
+                clip_path = media_by_scene.get(s_id) or valid_pool[scene_idx % len(valid_pool)]
+                target_dur = float(getattr(s, "duration", 3.0))
+
+                try:
+                    with VideoFileClip(clip_path) as clip:
+                        clip_dur = min(clip.duration, target_dur)
+                        if clip_dur <= 0.1:
+                            clip_dur = target_dur
+                        subclip = clip.subclipped(0, min(clip.duration, clip_dur))
+                        fitted = fit_clip_to_canvas(subclip, target_width, target_height, fit_mode=fit_mode)
+
+                        temp_file = os.path.join(temp_dir, f"scene_clip_{scene_idx}.mp4")
+                        fitted.write_videofile(temp_file, codec="libx264", audio=False, logger=None)
+                        processed_paths.append(temp_file)
+
+                        current_duration += clip_dur
+                        scene_idx += 1
+                except Exception as e:
+                    print(f"Error processing scene {s_id} clip {clip_path}: {e}")
+
+        if not processed_paths:
+            raise RuntimeError("Failed to process any scene clips.")
+
+        concat_clips_with_ffmpeg(processed_paths, output_path)
+
+        for p in processed_paths:
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+
+        return output_path
+

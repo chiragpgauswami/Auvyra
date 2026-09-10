@@ -6,8 +6,10 @@ class ContentIdeaRepository(BaseRepository):
     def __init__(self, db: AsyncIOMotorDatabase):
         super().__init__(db, "content_ideas")
 
-    async def find_by_channel(self, user_id: str, channel_id: str, status: str = None, skip: int = 0, limit: int = 50) -> list[dict]:
-        query = {"user_id": user_id, "channel_id": channel_id}
+    async def find_by_channel(self, user_id: str, channel_id: str = None, status: str = None, skip: int = 0, limit: int = 50) -> list[dict]:
+        query = {"user_id": user_id}
+        if channel_id:
+            query["channel_id"] = channel_id
         if status:
             query["status"] = status
         return await self.find_many(query, skip=skip, limit=limit)

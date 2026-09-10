@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-10  
 **Target:** Auvyra — Autonomous YouTube Channel Operating System  
-**Product Motto:** *"Your YouTube Channel. On Autopilot."*
+**Product Motto:** _"Your YouTube Channel. On Autopilot."_
 
 ---
 
@@ -10,20 +10,21 @@
 
 This baseline establishes the exact state of the Auvyra codebase prior to GSD phase execution. Auvyra is not starting from scratch; it already has substantial foundations in FastAPI, Motor (MongoDB), React/Vite, and MoneyPrinterTurbo-derived video composition. However, critical runtime pipelines (Pexels per-scene footage, Visual Storyboard, Autopilot Engine, Channel Brain feedback loop, and integrated frontend workflows) are incomplete or absent.
 
-| Category | Count | Status Overview |
-| :--- | :---: | :--- |
-| **IMPLEMENTED** | 14 | Auth, DB, Repositories, Ollama Gateway, YouTube API Client, Edge-TTS, FFmpeg Codec Fallback, Stream Endpoints, Doctor Script |
-| **PARTIALLY IMPLEMENTED** | 8 | Pexels Provider, Video Pipeline, Channel Memory, Research Service, Publishing Service, Analytics Service, Learning Service, Video Page |
-| **BROKEN** | 3 | Video Visual Quality (static gradient fallback), Analytics Frontend (hardcoded 0s), Token Decryption Persistence across worker restarts |
-| **MOCKED** | 0 | Zero-mock policy strictly maintained in core paths; unconfigured OAuth/YouTube returns honest blocked/400/403 states |
-| **DEAD CODE** | 2 | Empty placeholder `Publishing.tsx` card, unused `autopilot_enabled` boolean on channel schema |
-| **MISSING** | 7 | Visual Storyboard Engine, Pexels Per-Scene Stock Service, Channel Onboarding Wizard, Channel Brain System, Autopilot Background Engine, Video QA Inspection Tool (`scripts/inspect_video.py`), Dedicated Autopilot & AI Brain Pages |
+| Category                  | Count | Status Overview                                                                                                                                                                                                                     |
+| :------------------------ | :---: | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **IMPLEMENTED**           |  14   | Auth, DB, Repositories, Ollama Gateway, YouTube API Client, Edge-TTS, FFmpeg Codec Fallback, Stream Endpoints, Doctor Script                                                                                                        |
+| **PARTIALLY IMPLEMENTED** |   8   | Pexels Provider, Video Pipeline, Channel Memory, Research Service, Publishing Service, Analytics Service, Learning Service, Video Page                                                                                              |
+| **BROKEN**                |   3   | Video Visual Quality (static gradient fallback), Analytics Frontend (hardcoded 0s), Token Decryption Persistence across worker restarts                                                                                             |
+| **MOCKED**                |   0   | Zero-mock policy strictly maintained in core paths; unconfigured OAuth/YouTube returns honest blocked/400/403 states                                                                                                                |
+| **DEAD CODE**             |   2   | Empty placeholder `Publishing.tsx` card, unused `autopilot_enabled` boolean on channel schema                                                                                                                                       |
+| **MISSING**               |   7   | Visual Storyboard Engine, Pexels Per-Scene Stock Service, Channel Onboarding Wizard, Channel Brain System, Autopilot Background Engine, Video QA Inspection Tool (`scripts/inspect_video.py`), Dedicated Autopilot & AI Brain Pages |
 
 ---
 
 ## 2. Detailed Subsystem Audit
 
 ### 2.1 Authentication & Security Layer
+
 - **Status:** **IMPLEMENTED**
 - **Files:**
   - `backend/app/auth/service.py`
@@ -41,6 +42,7 @@ This baseline establishes the exact state of the Auvyra codebase prior to GSD ph
 ---
 
 ### 2.2 YouTube OAuth & Channel Integration
+
 - **Status:** **IMPLEMENTED / PARTIALLY IMPLEMENTED**
 - **Files:**
   - `backend/app/youtube/client.py`
@@ -57,6 +59,7 @@ This baseline establishes the exact state of the Auvyra codebase prior to GSD ph
 ---
 
 ### 2.3 Channel Brain & Onboarding
+
 - **Status:** **MISSING**
 - **Files:**
   - `backend/app/models/channel.py` (only basic `ChannelMemory` stub)
@@ -73,6 +76,7 @@ This baseline establishes the exact state of the Auvyra codebase prior to GSD ph
 ---
 
 ### 2.4 Research & Opportunity Engine
+
 - **Status:** **PARTIALLY IMPLEMENTED**
 - **Files:**
   - `backend/app/services/research_service.py`
@@ -88,6 +92,7 @@ This baseline establishes the exact state of the Auvyra codebase prior to GSD ph
 ---
 
 ### 2.5 Script & Structured AI Generation
+
 - **Status:** **IMPLEMENTED**
 - **Files:**
   - `backend/app/ai/gateway.py`
@@ -102,6 +107,7 @@ This baseline establishes the exact state of the Auvyra codebase prior to GSD ph
 ---
 
 ### 2.6 Visual Storyboard Engine
+
 - **Status:** **MISSING (CRITICAL DEFECT ROOT CAUSE)**
 - **Files:**
   - None (currently absent)
@@ -116,6 +122,7 @@ This baseline establishes the exact state of the Auvyra codebase prior to GSD ph
 ---
 
 ### 2.7 Pexels Stock Video Pipeline
+
 - **Status:** **PARTIALLY IMPLEMENTED / BROKEN**
 - **Files:**
   - `backend/app/video/media/pexels_provider.py`
@@ -134,6 +141,7 @@ This baseline establishes the exact state of the Auvyra codebase prior to GSD ph
 ---
 
 ### 2.8 Video Composition & Quality Assurance
+
 - **Status:** **PARTIALLY IMPLEMENTED**
 - **Files:**
   - `backend/app/video/composition/assembler.py`
@@ -155,6 +163,7 @@ This baseline establishes the exact state of the Auvyra codebase prior to GSD ph
 ---
 
 ### 2.9 YouTube Publishing & Content Calendar
+
 - **Status:** **PARTIALLY IMPLEMENTED**
 - **Files:**
   - `backend/app/youtube/client.py` (resumable upload implemented)
@@ -171,6 +180,7 @@ This baseline establishes the exact state of the Auvyra codebase prior to GSD ph
 ---
 
 ### 2.10 YouTube Analytics & Learning Loop
+
 - **Status:** **PARTIALLY IMPLEMENTED / BROKEN**
 - **Files:**
   - `backend/app/youtube/client.py` (`get_channel_reports()` implemented)
@@ -188,6 +198,7 @@ This baseline establishes the exact state of the Auvyra codebase prior to GSD ph
 ---
 
 ### 2.11 Autopilot Engine & Runtime Automation
+
 - **Status:** **MISSING (CRITICAL PRODUCT GAP)**
 - **Files:**
   - `backend/app/models/channel.py` (contains dead `autopilot_enabled` boolean)
@@ -204,6 +215,7 @@ This baseline establishes the exact state of the Auvyra codebase prior to GSD ph
 ---
 
 ### 2.12 Frontend Operating System Integration
+
 - **Status:** **PARTIALLY IMPLEMENTED**
 - **Files:**
   - `frontend/src/pages/`

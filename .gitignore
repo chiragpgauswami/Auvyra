@@ -37,3 +37,5 @@ dist/
 
 # Project specific
 media/
+client_secret*.json
+*.credentials.json

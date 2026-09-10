@@ -54,3 +54,4 @@ async def test_path_traversal_prevention(temp_storage):
         await temp_storage.get("../../../secret.key")
 
     os.remove(temp_src)
+

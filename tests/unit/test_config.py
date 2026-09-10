@@ -22,3 +22,4 @@ def test_optional_features_status():
     report = validate_environment(settings)
     assert report["features"]["google_oauth"]["status"] == "disabled"
     assert report["optional"]["pexels"]["status"] == "disabled"
+

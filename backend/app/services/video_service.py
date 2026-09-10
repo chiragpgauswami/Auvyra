@@ -114,10 +114,26 @@ class VideoService:
             progress_callback=progress_callback
         )
         
+        # Persist to permanent storage under media/videos/{channel_id}/{video_id}.mp4
+        media_root = getattr(self.storage, "root_dir", "media") if self.storage else "media"
+        perm_dir = os.path.join(media_root, "videos", str(channel_id))
+        os.makedirs(perm_dir, exist_ok=True)
+        perm_file = os.path.join(perm_dir, f"{video_id}.mp4")
+        
+        import shutil
+        if os.path.exists(result.video_path):
+            shutil.copy2(result.video_path, perm_file)
+            final_file_path = os.path.abspath(perm_file)
+        else:
+            final_file_path = result.video_path
+            
+        stream_url = f"/api/videos/{video_id}/stream"
+        
         # Update video record with generated metadata
         update_data = {
             "status": "generated",
-            "file_path": result.video_path,
+            "file_path": final_file_path,
+            "stream_url": stream_url,
             "duration": result.duration,
             "width": result.width,
             "height": result.height,
@@ -143,7 +159,11 @@ class VideoService:
                 "duration": result.duration
             })
             
-        return result.model_dump()
+        result_dict = result.model_dump()
+        result_dict["stream_url"] = stream_url
+        result_dict["video_id"] = str(video_id)
+        result_dict["permanent_path"] = final_file_path
+        return result_dict
     
     async def delete_video(self, user_id: str, video_id: str) -> bool:
         return await self.video_repo.delete_one(video_id, user_id=user_id)

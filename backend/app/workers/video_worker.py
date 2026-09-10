@@ -33,3 +33,19 @@ class VideoWorker(BaseWorker):
         result = await self.video_service.process_video_job(job, progress_callback=on_progress)
         await self.job_repo.update_progress(job_id, 100, result=result, status="completed")
         logger.success(f"VideoWorker completed job {job_id}")
+
+if __name__ == "__main__":
+    import asyncio
+    from backend.app.database import db_manager
+    from backend.app.config import get_settings
+
+    async def main():
+        settings = get_settings()
+        await db_manager.connect()
+        worker = VideoWorker(db_manager.get_database(), settings=settings)
+        await worker.run()
+
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

@@ -113,3 +113,27 @@ async def test_auth_full_lifecycle(test_db):
             "password": new_password
         })
         assert resp.status_code == 200
+
+        # 14. Google OAuth initiation with browser Accept header -> 307 Redirect to Google
+        resp = await client.get("/api/auth/google", headers={"Accept": "text/html,application/xhtml+xml"}, follow_redirects=False)
+        assert resp.status_code == 307
+        assert "accounts.google.com" in resp.headers["location"]
+
+        # 15. Google OAuth initiation with JSON Accept header -> 200 {"url": "..."}
+        resp = await client.get("/api/auth/google", headers={"Accept": "application/json"})
+        assert resp.status_code == 200
+        assert "url" in resp.json()
+        assert "accounts.google.com" in resp.json()["url"]
+
+        # 16. Google OAuth callback with error parameter -> 307 Redirect to frontend login with error
+        resp = await client.get(
+            "/api/auth/google/callback?error=access_denied&error_description=User+cancelled",
+            headers={"Accept": "text/html"},
+            follow_redirects=False
+        )
+        assert resp.status_code == 307
+        assert "login?error=" in resp.headers["location"]
+
+        # 17. Google OAuth callback missing code -> 400
+        resp = await client.get("/api/auth/google/callback", headers={"Accept": "application/json"})
+        assert resp.status_code == 400

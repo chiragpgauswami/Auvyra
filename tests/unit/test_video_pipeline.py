@@ -35,3 +35,17 @@ def test_edge_tts_voice_cleaning():
 def test_ffmpeg_codec_resolution():
     codec = get_effective_codec("libx264")
     assert codec in ["libx264", "h264_videotoolbox", "h264_nvenc"]
+
+def test_validate_media_asset_nonexistent():
+    from backend.app.video.validation import validate_media_asset
+    is_valid, msg = validate_media_asset("/nonexistent/video.mp4")
+    assert is_valid is False
+    assert "does not exist" in msg
+
+def test_validate_video_content_nonexistent():
+    from backend.app.video.validation import validate_video_content
+    report = validate_video_content("/nonexistent/video.mp4")
+    assert report.is_valid is False
+    assert len(report.failure_reasons) > 0
+
+

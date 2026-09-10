@@ -1,6 +1,12 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User } from '../types';
-import * as authApi from '../api/auth';
+import {
+  createContext,
+  ReactNode,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
+import * as authApi from "../api/auth";
+import { User } from "../types";
 
 interface AuthContextType {
   user: User | null;
@@ -10,6 +16,10 @@ interface AuthContextType {
   register: (email: string, pass: string, name: string) => Promise<void>;
   logout: () => void;
   refreshToken: () => Promise<void>;
+  handleOAuthCallback: (
+    accessToken: string,
+    refreshToken: string,
+  ) => Promise<User>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -20,7 +30,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const initAuth = async () => {
-      const token = localStorage.getItem('access_token');
+      const token = localStorage.getItem("access_token");
       if (token) {
         try {
           const u = await authApi.getMe();
@@ -36,15 +46,29 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const login = async (email: string, pass: string) => {
     const tokens = await authApi.login(email, pass);
-    localStorage.setItem('access_token', tokens.access_token);
-    localStorage.setItem('refresh_token', tokens.refresh_token);
+    localStorage.setItem("access_token", tokens.access_token);
+    localStorage.setItem("refresh_token", tokens.refresh_token);
     const u = await authApi.getMe();
     setUser(u);
   };
 
   const register = async (email: string, pass: string, name: string) => {
-    await authApi.register(email, pass, name);
-    await login(email, pass);
+    const tokens = await authApi.register(email, pass, name);
+    localStorage.setItem("access_token", tokens.access_token);
+    localStorage.setItem("refresh_token", tokens.refresh_token);
+    const u = await authApi.getMe();
+    setUser(u);
+  };
+
+  const handleOAuthCallback = async (
+    accessToken: string,
+    refreshToken: string,
+  ) => {
+    localStorage.setItem("access_token", accessToken);
+    localStorage.setItem("refresh_token", refreshToken);
+    const u = await authApi.getMe();
+    setUser(u);
+    return u;
   };
 
   const logout = () => {
@@ -57,7 +81,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, register, logout, refreshToken }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        isAuthenticated: !!user,
+        isLoading,
+        login,
+        register,
+        logout,
+        refreshToken,
+        handleOAuthCallback,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
@@ -65,6 +100,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuth must be used within AuthProvider');
+  if (!context) throw new Error("useAuth must be used within AuthProvider");
   return context;
 };

@@ -5,6 +5,7 @@ This document defines the functional and non-functional requirements for Auvyra 
 ---
 
 ## 1. Authentication & Security
+
 - **AUTH-01:** Email and password registration with bcrypt hashing (min 8 characters).
 - **AUTH-02:** Access token (JWT, short-lived) and refresh token (random, SHA-256 hashed in DB) lifecycle.
 - **AUTH-03:** OAuth credentials and tokens must be encrypted at rest using Fernet AES-128. Encryption key must be loaded deterministically from environment.
@@ -14,6 +15,7 @@ This document defines the functional and non-functional requirements for Auvyra 
 ---
 
 ## 2. YouTube OAuth & Real Channel Connection
+
 - **YT-01:** Google OAuth 2.0 must request canonical scopes: `youtube.readonly`, `youtube.upload`, `yt-analytics.readonly`.
 - **YT-02:** Granted scopes must be verified on callback. If any required scope is missing, channel status must be marked `reauthorization_required` and UI must display `Reconnect YouTube`.
 - **YT-03:** YouTube Data API v3 `channels.list(mine=true)` must retrieve the real channel ID, title, handle, thumbnail, and subscriber count.
@@ -23,6 +25,7 @@ This document defines the functional and non-functional requirements for Auvyra 
 ---
 
 ## 3. Channel Onboarding & Channel Brain
+
 - **BRAIN-01:** Post-connection onboarding wizard collecting: niche, target audience, language, country, tone, content pillars, blocked topics, and reference channels.
 - **BRAIN-02:** Ollama AI generates strategic channel positioning, content pillars, hook rules, and CTA strategy based on onboarding answers.
 - **BRAIN-03:** Durable `ChannelBrain` MongoDB collection storing positioning, pillars, tone, winning/losing topics, winning/losing hooks, title patterns, best publish times, learned rules, and strategy version.
@@ -32,6 +35,7 @@ This document defines the functional and non-functional requirements for Auvyra 
 ---
 
 ## 4. Research & Opportunity Engine
+
 - **RES-01:** Research engine analyzes real market signals and niche evidence without fabricating trends.
 - **RES-02:** Structured opportunity scoring returning: topic, opportunity score, why now, evidence, sources, demand signal, competition signal, content gap, and recommended hook.
 - **RES-03:** AI Opportunity Feed in frontend (`/research`) with 1-click "Create Script" transition.
@@ -40,6 +44,7 @@ This document defines the functional and non-functional requirements for Auvyra 
 ---
 
 ## 5. Script & AI Gateway
+
 - **SCR-01:** Ollama integration via AsyncOpenAI client with self-healing JSON extraction and Pydantic validation.
 - **SCR-02:** Structured Shorts scripts containing: Hook (0–3s), Body, Transitions, Payoff, and CTA.
 - **SCR-03:** Script versioning and editing actions (regenerate, shorten, change tone, rewrite).
@@ -47,6 +52,7 @@ This document defines the functional and non-functional requirements for Auvyra 
 ---
 
 ## 6. Visual Storyboard Engine
+
 - **SB-01:** VisualStoryboard model decomposing script narration into timed scenes of 2–5 seconds duration.
 - **SB-02:** Each scene must define: `scene_id`, `start_time`, `end_time`, `duration`, `narration`, `visual_query`, `visual_type`, `caption`, `transition`, `text_overlay`.
 - **SB-03:** Narration-to-visual query generator using Ollama to extract concrete visual stock search terms from narration sentences.
@@ -55,6 +61,7 @@ This document defines the functional and non-functional requirements for Auvyra 
 ---
 
 ## 7. Pexels Stock Video Pipeline
+
 - **PEX-01:** `PexelsStockService` integrating with live Pexels API using `PEXELS_API_KEY`.
 - **PEX-02:** Per-scene search: executes targeted search for each storyboard scene query.
 - **PEX-03:** Orientation handling: prefers native portrait 9:16; falls back to landscape footage with intelligent center-cropping to 1080x1920 without aspect distortion.
@@ -66,6 +73,7 @@ This document defines the functional and non-functional requirements for Auvyra 
 ---
 
 ## 8. Video Composition, Audio, Subtitles & QA
+
 - **VID-01:** Multi-clip timeline assembly with FFmpeg, trimming and cropping clips to exact scene boundaries.
 - **VID-02:** Edge-TTS neural voice synthesis with configurable voice names and speech rates.
 - **VID-03:** Faster-whisper subtitle generation synchronized to spoken narration with high-contrast text styling and dark backdrops.
@@ -77,12 +85,14 @@ This document defines the functional and non-functional requirements for Auvyra 
 ---
 
 ## 9. Metadata & Thumbnail Pipeline
+
 - **META-01:** Generates YouTube title, description, hashtags, tags, CTA, category, and pinned comment using Ollama and Channel Brain.
 - **THUMB-01:** Generates branded thumbnail asset based on topic, hook, and video frame.
 
 ---
 
 ## 10. Real YouTube Publishing & Scheduling
+
 - **PUB-01:** Authenticated resumable video upload via YouTube Data API v3 with privacy setting (`private`, `unlisted`, `public`).
 - **PUB-02:** Returns real `youtube_video_id` and verifies video existence via API.
 - **PUB-03:** Frontend Content Calendar (`Publishing.tsx`) showing drafts, ready, scheduled, published, and failed videos with 1-click publishing.
@@ -90,6 +100,7 @@ This document defines the functional and non-functional requirements for Auvyra 
 ---
 
 ## 11. Real YouTube Analytics & Self-Learning Loop
+
 - **ANA-01:** Ingests real performance metrics from YouTube Analytics API v2 (views, watch time, average view duration, likes, comments, shares, subscribers).
 - **ANA-02:** Real Analytics frontend dashboard (`Analytics.tsx`) with historical trends and AI performance analysis.
 - **LRN-01:** Learning engine analyzes video metrics to produce observations, insights, confidence, and recommended actions.
@@ -98,6 +109,7 @@ This document defines the functional and non-functional requirements for Auvyra 
 ---
 
 ## 12. Autonomous Autopilot Engine
+
 - **AUTO-01:** `AutopilotService` orchestrating the 21-step autonomous cycle via persistent background jobs.
 - **AUTO-02:** Three operating modes: `OFF`, `ASSISTED` (pauses for approval at gates), `FULL_AUTOPILOT` (runs end-to-end automatically).
 - **AUTO-03:** Configurable settings: `videos_per_week`, `content_pillars`, `blocked_topics`, `publish_time`, `timezone`, `min_quality_score`, `approval_required`.
@@ -106,6 +118,7 @@ This document defines the functional and non-functional requirements for Auvyra 
 ---
 
 ## 13. Verification & Acceptance
+
 - **VER-01:** `scripts/doctor.py` validates all environment services (Python, Node, MongoDB, Ollama, Pexels, FFmpeg, TTS, Google OAuth).
 - **VER-02:** `scripts/test_pexels.py` verifies live Pexels search, download, and ffprobe inspection.
 - **VER-03:** `scripts/verify.sh` runs linting, unit tests, integration tests, video regression tests, frontend build, and production checks.

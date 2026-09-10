@@ -1,5 +1,7 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from urllib.parse import quote_plus
+from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr
 from loguru import logger
 
@@ -43,7 +45,7 @@ async def login(
     auth_service: AuthService = Depends(get_auth_service)
 ):
     try:
-        return await auth_service.login(data.email, data.password)
+        return await auth_service.login(data.login_identifier, data.password)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -115,37 +117,98 @@ async def reset_password(
             detail={"code": "RESET_FAILED", "message": str(e)}
         )
 
+from backend.app.youtube.scopes import CANONICAL_OAUTH_SCOPES, get_scope_string
+
 @router.get("/google")
-async def google_auth(auth_service: AuthService = Depends(get_auth_service)):
+async def google_auth(
+    request: Request,
+    auth_service: AuthService = Depends(get_auth_service)
+):
     settings = auth_service.settings
     if not settings.GOOGLE_CLIENT_ID:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "GOOGLE_AUTH_UNCONFIGURED", "message": "Google OAuth is not configured on this server"}
         )
+    scope_param = quote_plus(get_scope_string())
     url = (
         f"https://accounts.google.com/o/oauth2/v2/auth"
         f"?client_id={settings.GOOGLE_CLIENT_ID}"
         f"&redirect_uri={settings.GOOGLE_REDIRECT_URI}"
         f"&response_type=code"
-        f"&scope=openid email profile https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/yt-analytics.readonly"
+        f"&scope={scope_param}"
         f"&access_type=offline"
         f"&prompt=consent"
+        f"&include_granted_scopes=true"
     )
-    return {"url": url}
+    accept = request.headers.get("accept", "")
+    # If caller specifically wants JSON (e.g. automated test or programmatic API client)
+    if "application/json" in accept and "text/html" not in accept:
+        return {"url": url}
+    # Otherwise browser navigation redirects immediately to Google
+    return RedirectResponse(url=url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
-@router.get("/google/callback", response_model=TokenPair)
-async def google_oauth_callback(
-    code: str,
+@router.delete("/google/disconnect")
+async def disconnect_google(
+    user: dict = Depends(get_current_user),
     auth_service: AuthService = Depends(get_auth_service)
 ):
+    """Disconnect Google OAuth connection for current user, allowing clean re-authorization."""
+    result = await auth_service.oauth_repo.collection.delete_many({"user_id": str(user["_id"]), "provider": "google"})
+    return {"success": True, "deleted_count": result.deleted_count, "message": "Google connection disconnected"}
+
+@router.get("/google/callback")
+async def google_oauth_callback(
+    request: Request,
+    code: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+    auth_service: AuthService = Depends(get_auth_service)
+):
+    accept = request.headers.get("accept", "")
+    is_browser = "text/html" in accept or "*/*" in accept
+
+    if error:
+        logger.warning(f"Google OAuth denied or failed: {error} - {error_description}")
+        if is_browser:
+            return RedirectResponse(
+                url=f"{auth_service.settings.FRONTEND_URL}/login?error={quote_plus(error_description or error)}",
+                status_code=status.HTTP_307_TEMPORARY_REDIRECT
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "GOOGLE_OAUTH_DENIED", "message": error_description or error}
+        )
+
+    if not code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "MISSING_OAUTH_CODE", "message": "Authorization code is required"}
+        )
+
     try:
-        return await auth_service.google_oauth_callback(code)
+        token_pair = await auth_service.google_oauth_callback(code)
     except ValueError as e:
+        logger.error(f"Failed to exchange Google OAuth code: {e}")
+        if is_browser:
+            return RedirectResponse(
+                url=f"{auth_service.settings.FRONTEND_URL}/login?error={quote_plus(str(e))}",
+                status_code=status.HTTP_307_TEMPORARY_REDIRECT
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "OAUTH_EXCHANGE_FAILED", "message": str(e)}
         )
+
+    # For browser navigation, redirect straight to frontend with tokens
+    if is_browser:
+        redirect_url = (
+            f"{auth_service.settings.FRONTEND_URL}/oauth/callback"
+            f"?access_token={token_pair.access_token}&refresh_token={token_pair.refresh_token}"
+        )
+        return RedirectResponse(url=redirect_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+    return token_pair
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(user: dict = Depends(get_current_user)):

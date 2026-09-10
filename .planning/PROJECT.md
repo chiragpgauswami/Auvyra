@@ -11,6 +11,7 @@ An autonomous, closed-loop YouTube operating runtime where a user can connect a 
 ## Requirements
 
 ### Validated
+
 - [x] FastAPI asynchronous backend architecture with Motor (MongoDB) multi-tenant repository boundaries.
 - [x] Local LLM gateway (Ollama `llama3.1:8b`) with structured Pydantic validation and self-healing JSON retry.
 - [x] Google OAuth 2.0 with canonical YouTube scopes (`youtube.readonly`, `youtube.upload`, `yt-analytics.readonly`) and Fernet AES-128 token encryption at rest.
@@ -19,6 +20,7 @@ An autonomous, closed-loop YouTube operating runtime where a user can connect a 
 - [x] HTTP 206 Partial Content video streaming endpoint for in-browser playback.
 
 ### Active Scope (Production Hardening & Completion)
+
 - [ ] Real Pexels stock video pipeline downloading and smart-cropping actual footage covering 70%–90%+ of the visual timeline.
 - [ ] Visual Storyboard Engine converting script narration into 2–5s timed scenes with concrete visual search queries.
 - [ ] Persistent Channel Brain and interactive Channel Onboarding wizard.
@@ -31,6 +33,7 @@ An autonomous, closed-loop YouTube operating runtime where a user can connect a 
 - [ ] Full end-to-end browser user acceptance test via Antigravity Browser Agent.
 
 ### Out of Scope
+
 - Direct in-browser non-linear video editing (Auvyra is an autonomous operating system, not a manual editor).
 - TikTok / Instagram multi-platform auto-posting in Phase 1 (focus strictly on YouTube Shorts).
 - Synthetic AI avatars/talking heads (focus on high-retention stock footage sequences + typography + voice).

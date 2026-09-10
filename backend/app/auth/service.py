@@ -13,13 +13,16 @@ from loguru import logger
 from backend.app.config import Settings
 from backend.app.models.user import TokenPair
 from backend.app.repositories.users import UserRepository, OAuthAccountRepository, SessionRepository
+from backend.app.repositories.channels import ChannelRepository
 
 class AuthService:
     def __init__(self, db, settings: Settings):
+        self.db = db
         self.fernet = settings.get_fernet()
         self.user_repo = UserRepository(db)
         self.oauth_repo = OAuthAccountRepository(db)
         self.session_repo = SessionRepository(db)
+        self.channel_repo = ChannelRepository(db)
         self.settings = settings
     
     # ----------------------------------------------------------------------
@@ -215,6 +218,13 @@ class AuthService:
             expires_in = tokens.get("expires_in")
             token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in) if expires_in else None
             
+            # Extract and audit granted scopes
+            raw_scope = tokens.get("scope", "")
+            granted_scopes = [s.strip() for s in raw_scope.split(" ") if s.strip()]
+            logger.info(f"OAuth token acquired. Granted scopes ({len(granted_scopes)}):")
+            for s in granted_scopes:
+                logger.info(f"  - {s}")
+
             user_info_response = await client.get(
                 "https://www.googleapis.com/oauth2/v2/userinfo",
                 headers={"Authorization": f"Bearer {access_token}"}
@@ -242,6 +252,14 @@ class AuthService:
         else:
             user_id = str(user["_id"])
             
+        from backend.app.youtube.scopes import verify_granted_scopes
+        scope_audit = verify_granted_scopes(granted_scopes)
+        if not scope_audit["valid"]:
+            logger.warning(
+                f"OAuth credentials for user {user_id} missing required YouTube scopes: "
+                f"{scope_audit['missing_scopes']}. Reauthorization required for full features."
+            )
+
         # Encrypt sensitive OAuth tokens before storing into MongoDB
         oauth_data = {
             "user_id": user_id,
@@ -250,9 +268,69 @@ class AuthService:
             "access_token_encrypted": self.encrypt_token(access_token),
             "refresh_token_encrypted": self.encrypt_token(google_refresh_token) if google_refresh_token else None,
             "token_expires_at": token_expires_at,
+            "granted_scopes": granted_scopes,
+            "scope_valid": scope_audit["valid"],
+            "missing_scopes": scope_audit["missing_scopes"],
             "updated_at": now
         }
         await self.oauth_repo.upsert(user_id, "google", oauth_data)
+
+        # Auto-discover and link YouTube channel for this user
+        has_read_scope = (
+            "https://www.googleapis.com/auth/youtube.readonly" in granted_scopes
+            or "https://www.googleapis.com/auth/youtube" in granted_scopes
+        )
+        if has_read_scope:
+            try:
+                from backend.app.youtube.client import YouTubeClient, YouTubeAPIError
+                yt_client = YouTubeClient(access_token=access_token)
+                yt_info = await yt_client.get_my_channel()
+                yt_id = yt_info.get("youtube_channel_id") or yt_info.get("id")
+                if yt_id:
+                    existing_ch = await self.channel_repo.find_by_youtube_id(yt_id)
+                    if not existing_ch:
+                        await self.channel_repo.insert_one({
+                            "user_id": user_id,
+                            "name": yt_info.get("name") or yt_info.get("title") or "YouTube Channel",
+                            "description": yt_info.get("description") or "",
+                            "youtube_channel_id": yt_id,
+                            "handle": yt_info.get("handle") or yt_info.get("customUrl"),
+                            "thumbnail_url": yt_info.get("thumbnail_url"),
+                            "subscriber_count": yt_info.get("subscriber_count", 0),
+                            "video_count": yt_info.get("video_count", 0),
+                            "view_count": yt_info.get("view_count", 0),
+                            "status": "connected",
+                            "autopilot_enabled": False,
+                            "approval_required": True,
+                            "created_at": now,
+                            "updated_at": now
+                        })
+                        logger.info(f"Auto-created and linked YouTube channel '{yt_info.get('name')}' ({yt_id}) for user {user_id}")
+                    else:
+                        await self.channel_repo.update_one(str(existing_ch["_id"]), {
+                            "user_id": user_id,
+                            "status": "connected",
+                            "name": yt_info.get("name") or yt_info.get("title") or existing_ch.get("name"),
+                            "handle": yt_info.get("handle") or yt_info.get("customUrl") or existing_ch.get("handle"),
+                            "thumbnail_url": yt_info.get("thumbnail_url") or existing_ch.get("thumbnail_url"),
+                            "subscriber_count": yt_info.get("subscriber_count", existing_ch.get("subscriber_count", 0)),
+                            "video_count": yt_info.get("video_count", existing_ch.get("video_count", 0)),
+                            "view_count": yt_info.get("view_count", existing_ch.get("view_count", 0)),
+                            "updated_at": now
+                        })
+                        logger.info(f"Re-linked YouTube channel '{yt_info.get('name')}' ({yt_id}) for user {user_id}")
+            except YouTubeAPIError as yt_err:
+                if yt_err.error_code == "NO_CHANNEL":
+                    logger.info(f"Google account for user {user_id} does not have an active YouTube channel.")
+                else:
+                    logger.error(f"YouTube API error during channel auto-linking: {yt_err.message} (code: {yt_err.error_code})")
+            except Exception as yt_err:
+                logger.error(f"Unexpected error linking YouTube channel during OAuth: {yt_err}")
+        else:
+            logger.warning(
+                f"Skipping YouTube channel lookup: granted_scopes lacks 'https://www.googleapis.com/auth/youtube.readonly'. "
+                f"User must re-authenticate with prompt=consent to grant read access."
+            )
         
         # Create session
         new_access_token = self.create_access_token(user_id)

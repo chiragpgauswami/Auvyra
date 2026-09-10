@@ -24,3 +24,18 @@ async def get_job(job_id: str, user: dict = Depends(require_auth), repo: JobRepo
             detail={"code": "JOB_NOT_FOUND", "message": f"Job {job_id} not found or access denied"}
         )
     return serialize_doc(job)
+
+@router.get("/{job_id}/progress")
+async def get_job_progress(job_id: str, user: dict = Depends(require_auth), repo: JobRepository = Depends(get_job_repo)):
+    job = await repo.find_by_id(job_id, user_id=str(user["_id"]))
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": f"Job {job_id} not found or access denied"}
+        )
+    return {
+        "stage": job.get("stage") or job.get("status", "processing"),
+        "percent": job.get("progress", 0),
+        "message": job.get("message") or f"Job status: {job.get('status', 'processing')}",
+        "status": job.get("status", "processing")
+    }

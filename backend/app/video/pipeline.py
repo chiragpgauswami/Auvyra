@@ -6,18 +6,19 @@ from loguru import logger
 from .models import VideoGenerationRequest, VideoGenerationResult, PipelineProgress, VideoAspect
 from .tasks.manager import VideoTaskManager
 from .media.pexels_provider import PexelsProvider
+from .media.pexels_stock_service import PexelsStockService
 from .media.local_provider import LocalMediaProvider
+from .storyboard import StoryboardGenerator
 from .audio.edge_tts_provider import EdgeTTSProvider
 from .audio.duration import get_audio_duration
 from .subtitles.generator import SubtitleGenerator
 from .composition.assembler import VideoAssembler
 from .composition.overlay import VideoOverlay
 from .rendering.ffmpeg import probe_video_info
+from .validation import validate_video_content
 
 class VideoGenerationService:
-    """Clean interface for video generation.
-    The rest of Auvyra must not know whether the implementation comes from
-    MoneyPrinterTurbo, Auvyra-native code, or another future engine."""
+    """Clean interface for video generation with scene-by-scene storyboard stock footage."""
     
     def __init__(self, ai_client=None, media_provider=None, tts_provider=None, settings=None):
         self.ai_client = ai_client
@@ -29,14 +30,13 @@ class VideoGenerationService:
         if self.media_provider:
             return self.media_provider
         
-        # If explicitly local or no Pexels API key configured, use LocalMediaProvider
         pexels_key = os.getenv("PEXELS_API_KEY", "")
         if request.video_source == "local" or not pexels_key:
             logger.info("Using LocalMediaProvider (local-first mode)")
             return LocalMediaProvider()
         
-        logger.info("Using PexelsProvider")
-        return PexelsProvider(api_keys=pexels_key)
+        logger.info("Using PexelsStockService")
+        return PexelsStockService(api_keys=pexels_key)
 
     async def generate(self, request: VideoGenerationRequest, 
                        progress_callback: Optional[Callable[[PipelineProgress], None]] = None) -> VideoGenerationResult:
@@ -48,31 +48,61 @@ class VideoGenerationService:
         output_dir = request.output_dir or tempfile.mkdtemp(prefix="auvyra_video_")
         os.makedirs(output_dir, exist_ok=True)
         
-        # 2. Generate script assets (10%)
-        task_manager.report_progress(*task_manager.SCRIPT_ASSETS, "Preparing script and visual search terms")
+        # 2. Generate script assets & visual storyboard (10%)
+        task_manager.report_progress(*task_manager.SCRIPT_ASSETS, "Generating scene-by-scene visual storyboard")
         script = (request.script or "").strip()
         if not script:
-            script = f"Exploring the top tools in artificial intelligence. From automated creativity to intelligent workflows, modern AI is transforming how we build."
+            script = "Exploring the top tools in artificial intelligence. From automated creativity to intelligent workflows, modern AI is transforming how we build."
             
-        search_terms = [word for word in request.topic.split() if len(word) > 3]
-        if not search_terms:
-            search_terms = ["technology", "digital", "future"]
-            
-        # 3. Find media (25%)
-        task_manager.report_progress(*task_manager.FINDING_MEDIA, "Finding and selecting media assets")
-        aspect = VideoAspect(request.aspect_ratio)
-        provider = self._resolve_media_provider(request)
-        media_items = await provider.search_and_download(
-            queries=search_terms, 
-            dest_dir=output_dir,
-            aspect_ratio=aspect,
-            target_duration=request.duration
+        storyboard_gen = StoryboardGenerator(ai_gateway=self.ai_client)
+        storyboard = await storyboard_gen.generate_storyboard(
+            script=script,
+            total_duration=float(request.duration),
+            topic=request.topic,
+            aspect_ratio=request.aspect_ratio
         )
+        logger.info(f"Generated storyboard with {len(storyboard.scenes)} scenes (total {storyboard.total_duration:.1f}s)")
+            
+        # 3. Find and download stock media per scene (25%)
+        task_manager.report_progress(*task_manager.FINDING_MEDIA, f"Sourcing stock footage for {len(storyboard.scenes)} scenes")
+        aspect = VideoAspect(request.aspect_ratio)
+        pexels_key = os.getenv("PEXELS_API_KEY", "")
         
+        media_items = []
+        if pexels_key and request.video_source != "local":
+            try:
+                stock_service = PexelsStockService(api_keys=pexels_key)
+                media_items = await stock_service.fetch_media_for_storyboard(
+                    storyboard=storyboard,
+                    dest_dir=output_dir,
+                    aspect_ratio=aspect
+                )
+            except Exception as e:
+                logger.warning(f"Pexels storyboard fetch failed: {e}, falling back to general search")
+
         if not media_items:
-            # Fallback to local media provider if online provider failed or returned empty
-            logger.warning("Media search returned empty, falling back to LocalMediaProvider")
+            # Fallback to provider search
+            search_terms = []
+            for s in storyboard.scenes:
+                if s.search_queries:
+                    search_terms.append(s.search_queries[0])
+            if not search_terms:
+                search_terms = [word for word in request.topic.split() if len(word) > 3] or ["technology", "modern"]
+                
+            provider = self._resolve_media_provider(request)
+            if hasattr(provider, "search_and_download"):
+                media_items = await provider.search_and_download(
+                    queries=search_terms, 
+                    dest_dir=output_dir,
+                    aspect_ratio=aspect,
+                    target_duration=request.duration
+                )
+
+        if not media_items:
+            # Fallback to local media provider
+            logger.warning("Online stock search returned empty, falling back to LocalMediaProvider")
             local_fallback = LocalMediaProvider()
+            search_terms = [request.topic]
             media_items = await local_fallback.search_and_download(
                 queries=search_terms,
                 dest_dir=output_dir,
@@ -81,7 +111,7 @@ class VideoGenerationService:
             )
             
         if not media_items:
-            raise RuntimeError("Failed to find or generate suitable video media")
+            raise RuntimeError("Failed to find or generate suitable video media for the timeline")
             
         # 4. Generate narration (40%)
         task_manager.report_progress(*task_manager.GENERATING_NARRATION, "Synthesizing voice narration")
@@ -106,17 +136,30 @@ class VideoGenerationService:
             subtitle_generator.create_from_audio(audio_path, subtitle_path)
             
         # 6. Compose video (70%)
-        task_manager.report_progress(*task_manager.COMPOSING_VIDEO, "Composing video clips and timing")
+        task_manager.report_progress(*task_manager.COMPOSING_VIDEO, "Composing multi-clip video scenes and timing")
         assembler = VideoAssembler()
         assembled_video_path = os.path.join(output_dir, "assembled.mp4")
-        assembled_video_path = assembler.assemble_clips(
-            video_paths=media_items,
-            audio_duration=audio_duration,
-            aspect_ratio=aspect,
-            output_path=assembled_video_path,
-            max_clip_duration=request.max_clip_duration,
-            fit_mode="cover"
-        )
+        
+        has_storyboard_scenes = storyboard and storyboard.scenes and any(hasattr(m, "scene_index") and m.scene_index is not None for m in media_items)
+        if has_storyboard_scenes:
+            assembled_video_path = assembler.assemble_storyboard_scenes(
+                storyboard_scenes=storyboard.scenes,
+                media_items=media_items,
+                audio_duration=audio_duration,
+                aspect_ratio=aspect,
+                output_path=assembled_video_path,
+                fit_mode="cover"
+            )
+        else:
+            paths = [m.local_path if hasattr(m, "local_path") else str(m) for m in media_items]
+            assembled_video_path = assembler.assemble_clips(
+                video_paths=paths,
+                audio_duration=audio_duration,
+                aspect_ratio=aspect,
+                output_path=assembled_video_path,
+                max_clip_duration=request.max_clip_duration,
+                fit_mode="cover"
+            )
         
         # 7. Render (90%)
         task_manager.report_progress(*task_manager.RENDERING, "Rendering final video with FFmpeg")
@@ -133,9 +176,15 @@ class VideoGenerationService:
         if not success or not os.path.exists(final_video_path):
             raise RuntimeError("Final rendering failed")
             
-        # 8. Complete (100%)
+        # 8. Complete (100%) - Programmatic Visual QA
         task_manager.report_progress(*task_manager.COMPLETED, "Video generation successfully completed")
         
+        qa_report = validate_video_content(final_video_path, expected_duration=audio_duration)
+        if not qa_report.is_valid:
+            logger.warning(f"Visual QA warnings on output video: {qa_report.failure_reasons}")
+        else:
+            logger.info("Visual QA PASSED: Real stock video frames, valid audio, no black/void void.")
+
         info = probe_video_info(final_video_path)
         target_w, target_h = aspect.to_resolution()
         

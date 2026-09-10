@@ -43,6 +43,9 @@ class ScriptUpdate(BaseModel):
     script_text: Optional[str] = None
     status: Optional[str] = None
 
+class ScriptRewriteReq(BaseModel):
+    instruction: str = "Make it punchier and faster-paced"
+
 def get_content_service(db = Depends(get_db), settings = Depends(get_settings)):
     ai = AIGateway(settings)
     return ContentService(db, ai)
@@ -60,7 +63,7 @@ async def generate_ideas(req: IdeaGenerateReq, user: dict = Depends(require_auth
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 @router.get("/ideas")
-async def list_ideas(channel_id: str = Query(...), status: Optional[str] = Query(None), user: dict = Depends(require_auth), service: ContentService = Depends(get_content_service)):
+async def list_ideas(channel_id: Optional[str] = Query(None), status: Optional[str] = Query(None), user: dict = Depends(require_auth), service: ContentService = Depends(get_content_service)):
     return await service.list_ideas(str(user["_id"]), channel_id, status)
 
 @router.post("/ideas", status_code=status.HTTP_201_CREATED)
@@ -132,3 +135,20 @@ async def update_script(script_id: str, data: ScriptUpdate, user: dict = Depends
             detail={"code": "SCRIPT_NOT_FOUND", "message": f"Script {script_id} not found or access denied"}
         )
     return {"status": "success"}
+
+@router.post("/scripts/{script_id}/rewrite")
+async def rewrite_script(
+    script_id: str,
+    req: ScriptRewriteReq,
+    user: dict = Depends(require_auth),
+    service: ContentService = Depends(get_content_service)
+):
+    try:
+        return await service.rewrite_script(str(user["_id"]), script_id, req.instruction)
+    except OllamaUnavailableError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": e.code, "message": e.message, "details": {"url": e.url}}
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
