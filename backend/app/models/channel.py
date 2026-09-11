@@ -6,11 +6,14 @@ class ChannelCreate(BaseModel):
     description: str = ""
     youtube_channel_id: str | None = None
     handle: str | None = None
+    oauth_account_id: str | None = None
 
 class ChannelResponse(BaseModel):
     id: str
     user_id: str
     youtube_channel_id: str | None = None
+    oauth_account_id: str | None = None
+    google_account_email: str | None = None
     name: str
     handle: str | None = None
     description: str = ""
@@ -21,6 +24,8 @@ class ChannelResponse(BaseModel):
     status: str = "connected"  # connected, disconnected, pending
     autopilot_enabled: bool = False
     approval_required: bool = True
+    last_synced_at: datetime | None = None
+    next_sync_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

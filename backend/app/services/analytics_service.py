@@ -5,7 +5,7 @@ from backend.app.ai.gateway import AIGateway
 from backend.app.repositories.analytics import AnalyticsRepository, StrategyInsightRepository
 from backend.app.repositories.channels import ChannelRepository
 from backend.app.repositories.videos import VideoRepository
-from backend.app.youtube.client import YouTubeClient, YouTubeAPIError, get_youtube_client_for_user
+from backend.app.youtube.client import YouTubeClient, YouTubeAPIError, get_youtube_client_for_user, get_youtube_client_for_channel
 from backend.app.utils.serializers import serialize_doc, serialize_docs
 
 class AnalyticsService:
@@ -49,7 +49,7 @@ class AnalyticsService:
             raise ValueError("Channel not found or unauthorized")
 
         yt_channel_id = channel.get("youtube_channel_id")
-        yt_client = await get_youtube_client_for_user(user_id, self.db)
+        yt_client = await get_youtube_client_for_channel(channel_id, user_id, self.db)
         if not yt_client or not yt_client.access_token:
             raise YouTubeAPIError(
                 message="YouTube channel is not connected via OAuth. Connect your channel in Channels before syncing analytics.",

@@ -29,9 +29,14 @@ class OAuthAccount(BaseModel):
     user_id: str
     provider: str  # 'google'
     provider_account_id: str
+    email: str | None = None
+    name: str | None = None
+    picture: str | None = None
+    status: str = "connected"  # connected, disconnected
     access_token_encrypted: str
     refresh_token_encrypted: str | None = None
     token_expires_at: datetime | None = None
+    granted_scopes: list[str] = []
     created_at: datetime
     updated_at: datetime
 

@@ -27,7 +27,10 @@ async def init_test_db():
 
 @pytest.fixture
 async def test_db(init_test_db):
-    db = init_test_db
+    settings = get_settings()
+    if db_manager.client is None or db_manager.db is None:
+        await db_manager.connect(settings.MONGODB_URI, TEST_DB_NAME)
+    db = db_manager.get_database()
     # Clean all collections before each test
     collections = await db.list_collection_names()
     for col in collections:

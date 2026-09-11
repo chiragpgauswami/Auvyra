@@ -13,6 +13,27 @@ class ChannelRepository(BaseRepository):
     async def find_by_youtube_id(self, youtube_channel_id: str) -> dict | None:
         return await self.collection.find_one({"youtube_channel_id": youtube_channel_id})
 
+    async def find_by_oauth_account(self, oauth_account_id: str, user_id: str | None = None) -> list[dict]:
+        query = {"oauth_account_id": oauth_account_id}
+        if user_id:
+            query["user_id"] = user_id
+        cursor = self.collection.find(query)
+        return await cursor.to_list(length=100)
+
+    async def disconnect_channels_for_oauth_account(self, oauth_account_id: str, user_id: str) -> int:
+        """Mark channels associated with this OAuth account as disconnected and pause autopilot, preserving historical data."""
+        result = await self.collection.update_many(
+            {"oauth_account_id": oauth_account_id, "user_id": user_id},
+            {
+                "$set": {
+                    "status": "disconnected",
+                    "autopilot_enabled": False,
+                    "updated_at": datetime.now(timezone.utc)
+                }
+            }
+        )
+        return result.modified_count
+
 
 class ChannelMemoryRepository(BaseRepository):
     def __init__(self, db: AsyncIOMotorDatabase):

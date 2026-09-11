@@ -5,7 +5,7 @@ from loguru import logger
 from backend.app.repositories.publishing import PublishingRepository
 from backend.app.repositories.videos import VideoRepository
 from backend.app.repositories.users import OAuthAccountRepository
-from backend.app.youtube.client import YouTubeClient, YouTubeAPIError, get_youtube_client_for_user
+from backend.app.youtube.client import YouTubeClient, YouTubeAPIError, get_youtube_client_for_user, get_youtube_client_for_channel
 from backend.app.config import get_settings
 from backend.app.utils.serializers import serialize_doc, serialize_docs
 
@@ -97,8 +97,13 @@ class PublishingService:
         privacy = metadata.get("privacy", "private")
         file_path = video.get("file_path", "")
 
-        # Get connected YouTube client for this user with automatic token refresh
-        yt_client = await get_youtube_client_for_user(user_id, self.db)
+        # Get connected YouTube client for this channel with automatic token refresh
+        channel_id = video.get("channel_id")
+        if channel_id:
+            yt_client = await get_youtube_client_for_channel(channel_id, user_id, self.db)
+        else:
+            yt_client = await get_youtube_client_for_user(user_id, self.db)
+
         if not yt_client or (not yt_client.access_token and not yt_client.refresh_token):
             error_msg = "Google OAuth is not configured or YouTube channel is not connected. Connect YouTube via OAuth before publishing."
             logger.error(f"Publishing blocked for job {job_id}: {error_msg}")
@@ -151,4 +156,8 @@ class PublishingService:
         except YouTubeAPIError as e:
             logger.error(f"YouTube publishing failed for job {job_id}: {e.message}")
             await self.pub_repo.mark_failed(job_id, user_id, e.message)
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected publishing failure for job {job_id}: {e}")
+            await self.pub_repo.mark_failed(job_id, user_id, str(e))
             raise

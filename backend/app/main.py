@@ -48,11 +48,12 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down Auvyra backend...")
-    try:
-        await db_manager.disconnect()
-        logger.info("Disconnected from MongoDB.")
-    except Exception as e:
-        logger.warning(f"Error during MongoDB disconnect: {e}")
+    if settings.APP_ENV != "test":
+        try:
+            await db_manager.disconnect()
+            logger.info("Disconnected from MongoDB.")
+        except Exception as e:
+            logger.warning(f"Error during MongoDB disconnect: {e}")
 
 
 app = FastAPI(

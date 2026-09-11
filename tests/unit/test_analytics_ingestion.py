@@ -14,7 +14,7 @@ async def test_analytics_sync_blocks_unconnected():
         "youtube_channel_id": "UC123"
     })
 
-    with patch("backend.app.services.analytics_service.get_youtube_client_for_user", AsyncMock(return_value=None)):
+    with patch("backend.app.services.analytics_service.get_youtube_client_for_channel", AsyncMock(return_value=None)):
         with pytest.raises(YouTubeAPIError) as exc:
             await service.sync_channel_analytics("u1", "chan_1")
         assert exc.value.error_code == "GOOGLE_OAUTH_NOT_CONFIGURED"
@@ -51,7 +51,7 @@ async def test_analytics_sync_ingests_real_tabular_data():
     service.analytics_repo.create_snapshot = AsyncMock(return_value="snap_123")
     service.generate_insights = AsyncMock(return_value=[])
 
-    with patch("backend.app.services.analytics_service.get_youtube_client_for_user", AsyncMock(return_value=mock_yt)):
+    with patch("backend.app.services.analytics_service.get_youtube_client_for_channel", AsyncMock(return_value=mock_yt)):
         result = await service.sync_channel_analytics("u1", "chan_1")
 
     assert result["status"] == "success"

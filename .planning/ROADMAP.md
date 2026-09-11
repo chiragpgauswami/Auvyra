@@ -107,3 +107,43 @@ This roadmap organizes the development of Auvyra Phase 1 into 17 sequential, ver
 - **Goal:** Execute authoritative verification suite (`./scripts/verify.sh`) and produce final certification document.
 - **Key Deliverables:** `scripts/verify.sh`, `docs/AUVYRA_FINAL_CERTIFICATION.md`.
 - **Verification:** Single-command `./scripts/verify.sh` completes successfully.
+
+---
+
+## Milestone 2: Channel-Centric Autonomous YouTube Operating System
+
+### Phase 18: Multi-Account OAuth & Channel-Centric Data Model
+
+- **Goal:** Clean separation of User -> Google Connection(s) -> YouTube Channel(s), enabling multiple Google accounts per user with complete credential and asset isolation.
+- **Key Deliverables:** `OAuthAccount` multi-account storage, `channel.oauth_account_id` linkage, `get_youtube_client_for_channel`, multi-channel discovery and reconnection API.
+- **Verification:** Integration tests prove Channel A and Channel B operate independently on different Google credentials with zero token bleed.
+
+### Phase 19: AI Niche Discovery & Autopilot Setup Wizard Engine
+
+- **Goal:** Implement AI-assisted niche discovery and comprehensive Autopilot configuration wizard with automatic content plan generation.
+- **Key Deliverables:** `GET /api/channels/{id}/autopilot/niches` (live Ollama recommendations with score, reason, demand, style), `POST /api/channels/{id}/autopilot/configure` saving `AutopilotConfig`, and automated Content Plan generator creating scheduled weekly queues.
+- **Verification:** Backend test validates niche recommendations, config validation, and creation of initial scheduled content queue.
+
+### Phase 20: Persistent Autopilot Scheduler & Granular Job Pipeline
+
+- **Goal:** Build durable, background Autopilot scheduler and breakdown of monolithic execution into persistent, recoverable jobs with explicit failure reporting.
+- **Key Deliverables:** `AutopilotScheduler` background worker, granular job queue (channel_sync, research, script, storyboard, pexels, tts, subtitles, render, qa, metadata, schedule, upload, analytics, learn), fix for swallowed publishing errors, and persisted event stream (`autopilot_events`).
+- **Verification:** Scheduler executes scheduled tasks across simulated process restart; publishing failures mark jobs as FAILED/RETRYING instead of completed.
+
+### Phase 21: High-Retention Shorts Captions & Real Stock Video Composition
+
+- **Goal:** Elevate video aesthetics to authentic vertical Shorts with mobile-optimized caption formatting and Pexels asset tracking.
+- **Key Deliverables:** Shorts caption formatting (1–4 words per unit, high-contrast backdrop pill, safe margins), Pexels asset metadata persistence per scene, stock footage timeline coverage verification ($\ge 70\%$).
+- **Verification:** Rendered MP4 inspected for punchy multi-word captions, stock coverage tracking, and absence of static blank voids.
+
+### Phase 22: Channel Control Center & Frontend Autopilot Wizard
+
+- **Goal:** Transform channel view into the central Channel Control Center with embedded Autopilot setup wizard, real performance telemetry, and live activity feed.
+- **Key Deliverables:** `ChannelDetail.tsx` / Channel Control Center route (`/channels/:id`), Autopilot Setup Wizard modal (8 steps), Content Pipeline visual status, Next Planned Content, and live Recent Autonomous Activity feed.
+- **Verification:** Frontend build (`npm run build`) passes cleanly; all interactive toggles, modals, and API contracts verified.
+
+### Phase 23: Full Autonomous Acceptance & Browser E2E Certification
+
+- **Goal:** Full real-user browser acceptance test and zero-mock certification of the continuous autonomous loop.
+- **Key Deliverables:** Updated `scripts/production_acceptance.py`, `scripts/real_user_acceptance_browser.js`, CodeRabbit review gate, and updated `docs/AUVYRA_FINAL_CERTIFICATION.md`.
+- **Verification:** Browser E2E completes end-to-end user journey without manual intervention in Full Autopilot mode.

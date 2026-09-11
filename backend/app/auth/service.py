@@ -194,7 +194,7 @@ class AuthService:
         await self.session_repo.revoke_all_user_sessions(user_id)
         return True
     
-    async def google_oauth_callback(self, code: str) -> TokenPair:
+    async def google_oauth_callback(self, code: str, current_user_id: Optional[str] = None) -> TokenPair:
         if not self.settings.GOOGLE_CLIENT_ID or not self.settings.GOOGLE_CLIENT_SECRET:
             raise ValueError("Google OAuth is not configured on this server")
 
@@ -237,20 +237,35 @@ class AuthService:
             name = user_info.get("name") or "YouTube Creator"
             google_id = user_info.get("id")
             
-        user = await self.user_repo.find_by_email(email)
         now = datetime.now(timezone.utc)
-        if not user:
-            user_doc = {
-                "email": email.lower().strip(),
-                "name": name,
-                "created_at": now,
-                "updated_at": now,
-                "email_verified": True,
-                "password_hash": ""
-            }
-            user_id = await self.user_repo.create_user(user_doc)
-        else:
+
+        if current_user_id:
+            # User is already authenticated in Auvyra and connecting an additional Google account
+            user = await self.user_repo.find_by_id(current_user_id)
+            if not user:
+                raise ValueError("Current user session is invalid")
             user_id = str(user["_id"])
+        else:
+            # New or returning user logging in via Google
+            user = await self.user_repo.find_by_email(email)
+            if not user:
+                user_doc = {
+                    "email": email.lower().strip(),
+                    "name": name,
+                    "created_at": now,
+                    "updated_at": now,
+                    "email_verified": True,
+                    "password_hash": ""
+                }
+                user_id = await self.user_repo.create_user(user_doc)
+            else:
+                user_id = str(user["_id"])
+
+        # Check for cross-user account conflict
+        existing_global = await self.oauth_repo.find_by_provider_account_id("google", google_id)
+        if existing_global and str(existing_global.get("user_id")) != str(user_id):
+            if existing_global.get("status") == "connected":
+                raise ValueError("This Google account is already linked to another Auvyra user account.")
             
         from backend.app.youtube.scopes import verify_granted_scopes
         scope_audit = verify_granted_scopes(granted_scopes)
@@ -260,22 +275,33 @@ class AuthService:
                 f"{scope_audit['missing_scopes']}. Reauthorization required for full features."
             )
 
+        # Preserve refresh token if not returned by Google in re-authorization
+        existing_oauth = await self.oauth_repo.find_by_account_id(user_id, "google", google_id)
+        if not google_refresh_token and existing_oauth and existing_oauth.get("refresh_token_encrypted"):
+            encrypted_refresh = existing_oauth.get("refresh_token_encrypted")
+        else:
+            encrypted_refresh = self.encrypt_token(google_refresh_token) if google_refresh_token else None
+
         # Encrypt sensitive OAuth tokens before storing into MongoDB
         oauth_data = {
             "user_id": user_id,
             "provider": "google",
             "provider_account_id": google_id,
+            "email": email.lower().strip() if email else None,
+            "name": name,
+            "picture": user_info.get("picture"),
+            "status": "connected",
             "access_token_encrypted": self.encrypt_token(access_token),
-            "refresh_token_encrypted": self.encrypt_token(google_refresh_token) if google_refresh_token else None,
+            "refresh_token_encrypted": encrypted_refresh,
             "token_expires_at": token_expires_at,
             "granted_scopes": granted_scopes,
             "scope_valid": scope_audit["valid"],
             "missing_scopes": scope_audit["missing_scopes"],
             "updated_at": now
         }
-        await self.oauth_repo.upsert(user_id, "google", oauth_data)
+        oauth_account_id = await self.oauth_repo.upsert_account(user_id, "google", google_id, oauth_data)
 
-        # Auto-discover and link YouTube channel for this user
+        # Auto-discover and link all YouTube channels under this Google account
         has_read_scope = (
             "https://www.googleapis.com/auth/youtube.readonly" in granted_scopes
             or "https://www.googleapis.com/auth/youtube" in granted_scopes
@@ -284,48 +310,44 @@ class AuthService:
             try:
                 from backend.app.youtube.client import YouTubeClient, YouTubeAPIError
                 yt_client = YouTubeClient(access_token=access_token)
-                yt_info = await yt_client.get_my_channel()
-                yt_id = yt_info.get("youtube_channel_id") or yt_info.get("id")
-                if yt_id:
+                channels_data = await yt_client.list_my_channels()
+                for yt_info in channels_data:
+                    yt_id = yt_info.get("youtube_channel_id") or yt_info.get("id")
+                    if not yt_id:
+                        continue
                     existing_ch = await self.channel_repo.find_by_youtube_id(yt_id)
+                    channel_fields = {
+                        "user_id": user_id,
+                        "oauth_account_id": str(oauth_account_id),
+                        "google_account_email": email.lower().strip() if email else None,
+                        "name": yt_info.get("name") or yt_info.get("title") or "YouTube Channel",
+                        "description": yt_info.get("description") or "",
+                        "youtube_channel_id": yt_id,
+                        "handle": yt_info.get("handle") or yt_info.get("customUrl"),
+                        "thumbnail_url": yt_info.get("thumbnail_url"),
+                        "subscriber_count": yt_info.get("subscriber_count", 0),
+                        "video_count": yt_info.get("video_count", 0),
+                        "view_count": yt_info.get("view_count", 0),
+                        "status": "connected",
+                        "last_synced_at": now,
+                        "updated_at": now
+                    }
                     if not existing_ch:
-                        await self.channel_repo.insert_one({
-                            "user_id": user_id,
-                            "name": yt_info.get("name") or yt_info.get("title") or "YouTube Channel",
-                            "description": yt_info.get("description") or "",
-                            "youtube_channel_id": yt_id,
-                            "handle": yt_info.get("handle") or yt_info.get("customUrl"),
-                            "thumbnail_url": yt_info.get("thumbnail_url"),
-                            "subscriber_count": yt_info.get("subscriber_count", 0),
-                            "video_count": yt_info.get("video_count", 0),
-                            "view_count": yt_info.get("view_count", 0),
-                            "status": "connected",
-                            "autopilot_enabled": False,
-                            "approval_required": True,
-                            "created_at": now,
-                            "updated_at": now
-                        })
-                        logger.info(f"Auto-created and linked YouTube channel '{yt_info.get('name')}' ({yt_id}) for user {user_id}")
+                        channel_fields["autopilot_enabled"] = False
+                        channel_fields["approval_required"] = True
+                        channel_fields["created_at"] = now
+                        await self.channel_repo.insert_one(channel_fields)
+                        logger.info(f"Auto-created and linked YouTube channel '{yt_info.get('name')}' ({yt_id}) for user {user_id} with oauth_account {oauth_account_id}")
                     else:
-                        await self.channel_repo.update_one(str(existing_ch["_id"]), {
-                            "user_id": user_id,
-                            "status": "connected",
-                            "name": yt_info.get("name") or yt_info.get("title") or existing_ch.get("name"),
-                            "handle": yt_info.get("handle") or yt_info.get("customUrl") or existing_ch.get("handle"),
-                            "thumbnail_url": yt_info.get("thumbnail_url") or existing_ch.get("thumbnail_url"),
-                            "subscriber_count": yt_info.get("subscriber_count", existing_ch.get("subscriber_count", 0)),
-                            "video_count": yt_info.get("video_count", existing_ch.get("video_count", 0)),
-                            "view_count": yt_info.get("view_count", existing_ch.get("view_count", 0)),
-                            "updated_at": now
-                        })
-                        logger.info(f"Re-linked YouTube channel '{yt_info.get('name')}' ({yt_id}) for user {user_id}")
+                        await self.channel_repo.update_one(str(existing_ch["_id"]), channel_fields)
+                        logger.info(f"Re-linked YouTube channel '{yt_info.get('name')}' ({yt_id}) for user {user_id} with oauth_account {oauth_account_id}")
             except YouTubeAPIError as yt_err:
                 if yt_err.error_code == "NO_CHANNEL":
                     logger.info(f"Google account for user {user_id} does not have an active YouTube channel.")
                 else:
                     logger.error(f"YouTube API error during channel auto-linking: {yt_err.message} (code: {yt_err.error_code})")
             except Exception as yt_err:
-                logger.error(f"Unexpected error linking YouTube channel during OAuth: {yt_err}")
+                logger.error(f"Unexpected error linking YouTube channels during OAuth: {yt_err}")
         else:
             logger.warning(
                 f"Skipping YouTube channel lookup: granted_scopes lacks 'https://www.googleapis.com/auth/youtube.readonly'. "
@@ -340,6 +362,52 @@ class AuthService:
         await self.session_repo.create_session(user_id, hashed_rt, expires_at)
         
         return TokenPair(access_token=new_access_token, refresh_token=new_refresh_token, token_type="bearer")
+
+    async def disconnect_oauth_account(self, user_id: str, account_id: str) -> bool:
+        """Safely disconnect a specific Google OAuth account and its associated channels.
+        Preserves all historical data (videos, analytics, scripts, channel brain).
+        """
+        account = await self.oauth_repo.find_by_id(account_id, user_id=user_id)
+        if not account:
+            return False
+        await self.oauth_repo.disconnect_account(account_id, user_id)
+        await self.channel_repo.disconnect_channels_for_oauth_account(account_id, user_id)
+        logger.info(f"Safely disconnected OAuth account {account_id} and associated channels for user {user_id}")
+        return True
+
+    async def disconnect_all_oauth_accounts(self, user_id: str) -> int:
+        """Safely disconnect all Google OAuth accounts for a user, preserving all data."""
+        accounts = await self.oauth_repo.find_all_by_user(user_id, "google")
+        count = 0
+        for acc in accounts:
+            if acc.get("status") != "disconnected":
+                acc_id = str(acc["_id"])
+                await self.oauth_repo.disconnect_account(acc_id, user_id)
+                await self.channel_repo.disconnect_channels_for_oauth_account(acc_id, user_id)
+                count += 1
+        logger.info(f"Safely disconnected {count} OAuth accounts for user {user_id}")
+        return count
+
+    async def get_user_oauth_accounts(self, user_id: str) -> list[dict]:
+        """List all connected Google OAuth accounts with their channel counts."""
+        accounts = await self.oauth_repo.find_all_by_user(user_id, "google")
+        result = []
+        for acc in accounts:
+            acc_id = str(acc["_id"])
+            channels = await self.channel_repo.find_by_oauth_account(acc_id, user_id=user_id)
+            result.append({
+                "id": acc_id,
+                "provider": acc.get("provider", "google"),
+                "email": acc.get("email"),
+                "name": acc.get("name"),
+                "picture": acc.get("picture"),
+                "status": acc.get("status", "connected"),
+                "granted_scopes": acc.get("granted_scopes", []),
+                "channels_count": len(channels),
+                "created_at": acc.get("created_at"),
+                "updated_at": acc.get("updated_at")
+            })
+        return result
 
     async def get_current_user(self, token: str) -> dict:
         payload = self.decode_access_token(token)

@@ -122,6 +122,8 @@ from backend.app.youtube.scopes import CANONICAL_OAUTH_SCOPES, get_scope_string
 @router.get("/google")
 async def google_auth(
     request: Request,
+    user_id: Optional[str] = None,
+    account_hint: Optional[str] = None,
     auth_service: AuthService = Depends(get_auth_service)
 ):
     settings = auth_service.settings
@@ -130,7 +132,26 @@ async def google_auth(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "GOOGLE_AUTH_UNCONFIGURED", "message": "Google OAuth is not configured on this server"}
         )
+
+    # Check Authorization header if user_id was not explicitly passed
+    current_uid = user_id
+    auth_header = request.headers.get("authorization", "")
+    if not current_uid and auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+        try:
+            payload = auth_service.decode_access_token(token)
+            current_uid = payload.get("sub")
+        except Exception:
+            pass
+
+    state_param = ""
+    if current_uid:
+        import base64, json
+        state_data = json.dumps({"user_id": current_uid})
+        state_param = f"&state={quote_plus(base64.urlsafe_b64encode(state_data.encode()).decode())}"
+
     scope_param = quote_plus(get_scope_string())
+    prompt_param = "select_account%20consent" if account_hint else "consent"
     url = (
         f"https://accounts.google.com/o/oauth2/v2/auth"
         f"?client_id={settings.GOOGLE_CLIENT_ID}"
@@ -138,29 +159,49 @@ async def google_auth(
         f"&response_type=code"
         f"&scope={scope_param}"
         f"&access_type=offline"
-        f"&prompt=consent"
+        f"&prompt={prompt_param}"
         f"&include_granted_scopes=true"
+        f"{state_param}"
     )
     accept = request.headers.get("accept", "")
-    # If caller specifically wants JSON (e.g. automated test or programmatic API client)
     if "application/json" in accept and "text/html" not in accept:
         return {"url": url}
-    # Otherwise browser navigation redirects immediately to Google
     return RedirectResponse(url=url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
-@router.delete("/google/disconnect")
-async def disconnect_google(
+@router.get("/google/accounts")
+async def get_connected_google_accounts(
     user: dict = Depends(get_current_user),
     auth_service: AuthService = Depends(get_auth_service)
 ):
-    """Disconnect Google OAuth connection for current user, allowing clean re-authorization."""
-    result = await auth_service.oauth_repo.collection.delete_many({"user_id": str(user["_id"]), "provider": "google"})
-    return {"success": True, "deleted_count": result.deleted_count, "message": "Google connection disconnected"}
+    """List all connected Google OAuth accounts and their linked YouTube channels."""
+    accounts = await auth_service.get_user_oauth_accounts(str(user["_id"]))
+    return {"accounts": accounts}
+
+@router.delete("/google/disconnect")
+async def disconnect_google(
+    account_id: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+    auth_service: AuthService = Depends(get_auth_service)
+):
+    """Safely disconnect Google OAuth connection without deleting historical channels, videos, or metrics."""
+    user_id = str(user["_id"])
+    if account_id:
+        success = await auth_service.disconnect_oauth_account(user_id, account_id)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "ACCOUNT_NOT_FOUND", "message": "OAuth account not found or does not belong to user"}
+            )
+        return {"success": True, "message": f"OAuth account {account_id} disconnected successfully"}
+    else:
+        disconnected_count = await auth_service.disconnect_all_oauth_accounts(user_id)
+        return {"success": True, "disconnected_count": disconnected_count, "message": "All Google connections disconnected"}
 
 @router.get("/google/callback")
 async def google_oauth_callback(
     request: Request,
     code: Optional[str] = None,
+    state: Optional[str] = None,
     error: Optional[str] = None,
     error_description: Optional[str] = None,
     auth_service: AuthService = Depends(get_auth_service)
@@ -186,8 +227,18 @@ async def google_oauth_callback(
             detail={"code": "MISSING_OAUTH_CODE", "message": "Authorization code is required"}
         )
 
+    # Extract current_user_id from state if present
+    target_user_id = None
+    if state:
+        try:
+            import base64, json
+            decoded_state = json.loads(base64.urlsafe_b64decode(state.encode()).decode())
+            target_user_id = decoded_state.get("user_id")
+        except Exception:
+            target_user_id = None
+
     try:
-        token_pair = await auth_service.google_oauth_callback(code)
+        token_pair = await auth_service.google_oauth_callback(code, current_user_id=target_user_id)
     except ValueError as e:
         logger.error(f"Failed to exchange Google OAuth code: {e}")
         if is_browser:

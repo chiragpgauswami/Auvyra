@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from backend.app.auth.dependencies import require_auth
 from backend.app.database import get_db
 from backend.app.services.channel_service import ChannelService
@@ -80,12 +80,43 @@ async def get_youtube_connection_status(
 
 @router.post("/youtube/sync")
 async def sync_youtube_channel(
+    account_id: Optional[str] = None,
+    channel_id: Optional[str] = None,
     user: dict = Depends(require_auth),
     db = Depends(get_db)
 ):
     """Trigger live YouTube API lookup to refresh channel details from YouTube Data API v3."""
     user_id = str(user["_id"])
-    oauth = await db.oauth_accounts.find_one({"user_id": user_id, "provider": "google"})
+    
+    oauth = None
+    if account_id:
+        try:
+            oauth = await db.oauth_accounts.find_one({
+                "_id": ObjectId(account_id),
+                "user_id": user_id,
+                "status": {"$ne": "disconnected"}
+            })
+        except Exception:
+            oauth = None
+    elif channel_id:
+        try:
+            target_ch = await db.channels.find_one({"_id": ObjectId(channel_id), "user_id": user_id})
+            if target_ch and target_ch.get("oauth_account_id"):
+                oauth = await db.oauth_accounts.find_one({
+                    "_id": ObjectId(target_ch["oauth_account_id"]),
+                    "user_id": user_id,
+                    "status": {"$ne": "disconnected"}
+                })
+        except Exception:
+            oauth = None
+
+    if not oauth:
+        oauth = await db.oauth_accounts.find_one({
+            "user_id": user_id,
+            "provider": "google",
+            "status": {"$ne": "disconnected"}
+        })
+
     if not oauth:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -106,10 +137,13 @@ async def sync_youtube_channel(
             }
         )
 
-    from backend.app.youtube.client import get_youtube_client_for_user
+    from backend.app.youtube.client import get_youtube_client_for_channel, get_youtube_client_for_user
     try:
-        yt_client = await get_youtube_client_for_user(user_id, db)
-        ch_info = await yt_client.get_my_channel()
+        if channel_id:
+            yt_client = await get_youtube_client_for_channel(channel_id, user_id, db)
+        else:
+            yt_client = await get_youtube_client_for_user(user_id, db)
+        channels_info = await yt_client.list_my_channels()
     except YouTubeAPIError as e:
         if e.error_code == "NO_CHANNEL":
             raise HTTPException(
@@ -123,61 +157,84 @@ async def sync_youtube_channel(
 
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
-    yt_id = ch_info["youtube_channel_id"]
-    existing = await db.channels.find_one({"youtube_channel_id": yt_id})
-    if not existing:
-        res = await db.channels.insert_one({
+    synced_docs = []
+
+    for ch_info in channels_info:
+        yt_id = ch_info["youtube_channel_id"]
+        existing = await db.channels.find_one({"youtube_channel_id": yt_id})
+        update_payload = {
             "user_id": user_id,
+            "oauth_account_id": str(oauth["_id"]),
+            "google_account_email": oauth.get("email"),
             "name": ch_info["name"],
             "description": ch_info.get("description", ""),
-            "youtube_channel_id": yt_id,
-            "handle": ch_info.get("handle"),
-            "thumbnail_url": ch_info.get("thumbnail_url"),
-            "subscriber_count": ch_info.get("subscriber_count", 0),
-            "video_count": ch_info.get("video_count", 0),
-            "view_count": ch_info.get("view_count", 0),
+            "handle": ch_info.get("handle") or (existing.get("handle") if existing else None),
+            "thumbnail_url": ch_info.get("thumbnail_url") or (existing.get("thumbnail_url") if existing else None),
+            "subscriber_count": ch_info.get("subscriber_count", existing.get("subscriber_count", 0) if existing else 0),
+            "video_count": ch_info.get("video_count", existing.get("video_count", 0) if existing else 0),
+            "view_count": ch_info.get("view_count", existing.get("view_count", 0) if existing else 0),
             "status": "connected",
-            "autopilot_enabled": False,
-            "approval_required": True,
-            "created_at": now,
+            "last_synced_at": now,
             "updated_at": now
-        })
-        ch_doc = await db.channels.find_one({"_id": res.inserted_id})
-    else:
-        await db.channels.update_one(
-            {"_id": existing["_id"]},
-            {"$set": {
-                "user_id": user_id,
-                "status": "connected",
-                "name": ch_info["name"],
-                "handle": ch_info.get("handle") or existing.get("handle"),
-                "thumbnail_url": ch_info.get("thumbnail_url") or existing.get("thumbnail_url"),
-                "subscriber_count": ch_info.get("subscriber_count", existing.get("subscriber_count", 0)),
-                "video_count": ch_info.get("video_count", existing.get("video_count", 0)),
-                "view_count": ch_info.get("view_count", existing.get("view_count", 0)),
-                "updated_at": now
-            }}
-        )
-        ch_doc = await db.channels.find_one({"_id": existing["_id"]})
+        }
+        if not existing:
+            update_payload["youtube_channel_id"] = yt_id
+            update_payload["autopilot_enabled"] = False
+            update_payload["approval_required"] = True
+            update_payload["created_at"] = now
+            res = await db.channels.insert_one(update_payload)
+            ch_doc = await db.channels.find_one({"_id": res.inserted_id})
+        else:
+            await db.channels.update_one({"_id": existing["_id"]}, {"$set": update_payload})
+            ch_doc = await db.channels.find_one({"_id": existing["_id"]})
+        synced_docs.append(ch_doc)
 
-    from backend.app.utils.serializers import serialize_doc
-    return serialize_doc(ch_doc)
+    from backend.app.utils.serializers import serialize_docs, serialize_doc
+    if len(synced_docs) == 1:
+        return serialize_doc(synced_docs[0])
+    return {"channels": serialize_docs(synced_docs)}
 
 @router.delete("/youtube/disconnect")
 async def disconnect_youtube_channel(
+    account_id: Optional[str] = None,
+    channel_id: Optional[str] = None,
     user: dict = Depends(require_auth),
     db = Depends(get_db)
 ):
-    """Safely disconnect YouTube channel and remove OAuth tokens for the authenticated user."""
+    """Safely disconnect YouTube channel without deleting historical data."""
     user_id = str(user["_id"])
-    del_res = await db.oauth_accounts.delete_many({"user_id": user_id, "provider": "google"})
+    now = datetime.now(timezone.utc)
+
+    if channel_id:
+        await db.channels.update_one(
+            {"_id": ObjectId(channel_id), "user_id": user_id},
+            {"$set": {"status": "disconnected", "autopilot_enabled": False, "updated_at": now}}
+        )
+        return {"success": True, "message": f"Channel {channel_id} disconnected successfully."}
+
+    if account_id:
+        await db.oauth_accounts.update_one(
+            {"_id": ObjectId(account_id), "user_id": user_id},
+            {"$set": {"status": "disconnected", "updated_at": now}}
+        )
+        await db.channels.update_many(
+            {"oauth_account_id": account_id, "user_id": user_id},
+            {"$set": {"status": "disconnected", "autopilot_enabled": False, "updated_at": now}}
+        )
+        return {"success": True, "message": f"OAuth account {account_id} and associated channels disconnected."}
+
+    # Disconnect all active Google accounts
+    await db.oauth_accounts.update_many(
+        {"user_id": user_id, "provider": "google"},
+        {"$set": {"status": "disconnected", "updated_at": now}}
+    )
     await db.channels.update_many(
         {"user_id": user_id, "youtube_channel_id": {"$exists": True, "$ne": None}},
-        {"$set": {"status": "disconnected"}}
+        {"$set": {"status": "disconnected", "autopilot_enabled": False, "updated_at": now}}
     )
     return {
         "success": True,
-        "message": "YouTube channel disconnected successfully. You can now re-authorize."
+        "message": "All connected YouTube channels safely disconnected. Historical data preserved."
     }
 
 @router.post("/", status_code=status.HTTP_201_CREATED)

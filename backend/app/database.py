@@ -12,16 +12,25 @@ class MongoDBManager:
         settings = get_settings()
         target_uri = uri or settings.MONGODB_URI
         target_db = database or settings.MONGODB_DATABASE
+        if self.client is not None:
+            try:
+                self.client.close()
+            except Exception:
+                pass
         self.client = AsyncIOMotorClient(target_uri)
         self.db = self.client[target_db]
 
     async def disconnect(self):
         if self.client:
             self.client.close()
+            self.client = None
+            self.db = None
 
     def get_database(self) -> AsyncIOMotorDatabase:
-        if self.db is None:
-            raise RuntimeError("Database not initialized. Call connect() first.")
+        if self.db is None or self.client is None:
+            settings = get_settings()
+            self.client = AsyncIOMotorClient(settings.MONGODB_URI)
+            self.db = self.client[settings.MONGODB_DATABASE]
         return self.db
 
     async def create_indexes(self):

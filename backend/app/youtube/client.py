@@ -1,5 +1,5 @@
 import httpx
-from typing import Dict, Any, Optional, Callable, Awaitable
+from typing import Dict, Any, Optional, Callable, Awaitable, List
 from datetime import datetime, timezone, timedelta
 from loguru import logger
 
@@ -201,8 +201,8 @@ class YouTubeClient:
 
             return resp
 
-    async def get_my_channel(self) -> Dict[str, Any]:
-        """Fetch authenticated user's YouTube channel metadata.
+    async def list_my_channels(self) -> List[Dict[str, Any]]:
+        """Fetch all YouTube channels owned by or accessible to this Google account.
         Requires https://www.googleapis.com/auth/youtube.readonly or https://www.googleapis.com/auth/youtube
         """
         params = {"part": "snippet,statistics", "mine": "true"}
@@ -211,32 +211,38 @@ class YouTubeClient:
         if resp.status_code != 200:
             raise self._parse_error(resp)
         items = resp.json().get("items", [])
-        if not items:
-            raise YouTubeAPIError("No YouTube channel found for this Google account.", status_code=404, error_code="NO_CHANNEL")
+        channels = []
+        for ch in items:
+            snippet = ch.get("snippet", {})
+            stats = ch.get("statistics", {})
+            thumb = (
+                snippet.get("thumbnails", {}).get("high", {}).get("url")
+                or snippet.get("thumbnails", {}).get("default", {}).get("url")
+            )
+            channels.append({
+                "id": ch.get("id"),
+                "youtube_channel_id": ch.get("id"),
+                "title": snippet.get("title"),
+                "name": snippet.get("title"),
+                "customUrl": snippet.get("customUrl"),
+                "handle": snippet.get("customUrl"),
+                "description": snippet.get("description", ""),
+                "thumbnail_url": thumb,
+                "subscriber_count": int(stats.get("subscriberCount", 0)),
+                "subscriberCount": int(stats.get("subscriberCount", 0)),
+                "video_count": int(stats.get("videoCount", 0)),
+                "videoCount": int(stats.get("videoCount", 0)),
+                "view_count": int(stats.get("viewCount", 0)),
+                "viewCount": int(stats.get("viewCount", 0)),
+            })
+        return channels
 
-        ch = items[0]
-        snippet = ch.get("snippet", {})
-        stats = ch.get("statistics", {})
-        thumb = (
-            snippet.get("thumbnails", {}).get("high", {}).get("url")
-            or snippet.get("thumbnails", {}).get("default", {}).get("url")
-        )
-        return {
-            "id": ch.get("id"),
-            "youtube_channel_id": ch.get("id"),
-            "title": snippet.get("title"),
-            "name": snippet.get("title"),
-            "customUrl": snippet.get("customUrl"),
-            "handle": snippet.get("customUrl"),
-            "description": snippet.get("description", ""),
-            "thumbnail_url": thumb,
-            "subscriber_count": int(stats.get("subscriberCount", 0)),
-            "subscriberCount": int(stats.get("subscriberCount", 0)),
-            "video_count": int(stats.get("videoCount", 0)),
-            "videoCount": int(stats.get("videoCount", 0)),
-            "view_count": int(stats.get("viewCount", 0)),
-            "viewCount": int(stats.get("viewCount", 0)),
-        }
+    async def get_my_channel(self) -> Dict[str, Any]:
+        """Fetch authenticated user's primary YouTube channel metadata."""
+        channels = await self.list_my_channels()
+        if not channels:
+            raise YouTubeAPIError("No YouTube channel found for this Google account.", status_code=404, error_code="NO_CHANNEL")
+        return channels[0]
 
     async def upload_video(self, file_path: str, title: str, description: str = "", tags: list[str] = None, privacy_status: str = "private") -> Dict[str, Any]:
         """Upload video file to YouTube Data API v3 using resumable upload protocol."""
@@ -382,11 +388,163 @@ class YouTubeClient:
             raise self._parse_error(resp)
         return resp.json()
 
-async def get_youtube_client_for_user(user_id: str, db) -> YouTubeClient:
-    """Factory creating a YouTubeClient with automated decryption and persistent token refresh.
-    Zero-Mock: Uses real stored credentials and persists refreshed tokens to MongoDB.
+from bson import ObjectId
+
+async def get_youtube_client_for_channel(channel_id: str, user_id: str, db) -> YouTubeClient:
+    """Factory creating a YouTubeClient strictly bound to a specific channel and its verified OAuth account.
+    Enforces strict ownership invariants:
+      - channel.user_id == user_id
+      - oauth_account.user_id == user_id
+      - channel.oauth_account_id == oauth_account._id
+      - oauth_account.status != 'disconnected'
     """
-    oauth_doc = await db.oauth_accounts.find_one({"user_id": user_id, "provider": "google"})
+    try:
+        oid = ObjectId(channel_id) if ObjectId.is_valid(channel_id) else channel_id
+        channel = await db.channels.find_one({"_id": oid})
+    except Exception:
+        channel = await db.channels.find_one({"_id": channel_id})
+
+    if not channel:
+        raise YouTubeAPIError(
+            message=f"Channel {channel_id} not found.",
+            status_code=404,
+            error_code="CHANNEL_NOT_FOUND"
+        )
+
+    # Ownership invariant: channel must belong to authenticated user
+    if str(channel.get("user_id")) != str(user_id):
+        raise YouTubeAPIError(
+            message="Forbidden: You do not own this channel.",
+            status_code=403,
+            error_code="CHANNEL_FORBIDDEN"
+        )
+
+    if channel.get("status") == "disconnected":
+        raise YouTubeAPIError(
+            message="YouTube channel is disconnected. Please reconnect your channel.",
+            status_code=401,
+            error_code="CHANNEL_DISCONNECTED"
+        )
+
+    oauth_account_id = channel.get("oauth_account_id")
+    oauth_doc = None
+
+    if oauth_account_id:
+        try:
+            oaid = ObjectId(oauth_account_id) if ObjectId.is_valid(oauth_account_id) else oauth_account_id
+            oauth_doc = await db.oauth_accounts.find_one({"_id": oaid})
+        except Exception:
+            oauth_doc = await db.oauth_accounts.find_one({"_id": oauth_account_id})
+
+        if not oauth_doc:
+            raise YouTubeAPIError(
+                message="Linked Google OAuth account not found.",
+                status_code=404,
+                error_code="OAUTH_ACCOUNT_NOT_FOUND"
+            )
+
+        # Strict ownership invariant:
+        # channel.user_id == oauth_account.user_id AND channel.oauth_account_id == oauth_account._id
+        if str(oauth_doc.get("user_id")) != str(user_id) or str(oauth_doc.get("_id")) != str(oauth_account_id):
+            raise YouTubeAPIError(
+                message="Security violation: Channel and OAuth account ownership mismatch.",
+                status_code=403,
+                error_code="OAUTH_OWNERSHIP_MISMATCH"
+            )
+    else:
+        # Legacy channel migration fallback: ONLY if oauth_account_id is missing
+        legacy_oauth = await db.oauth_accounts.find_one({
+            "user_id": user_id,
+            "provider": "google",
+            "status": {"$ne": "disconnected"}
+        })
+        if legacy_oauth:
+            oauth_doc = legacy_oauth
+            # Auto-migrate legacy channel to explicit oauth_account_id
+            await db.channels.update_one(
+                {"_id": channel["_id"]},
+                {"$set": {
+                    "oauth_account_id": str(legacy_oauth["_id"]),
+                    "google_account_email": legacy_oauth.get("email"),
+                    "updated_at": datetime.now(timezone.utc)
+                }}
+            )
+            logger.info(f"Migrated legacy channel {channel_id} to OAuth account {legacy_oauth['_id']}")
+        else:
+            raise YouTubeAPIError(
+                message="No active Google OAuth account linked to this channel. Please connect YouTube.",
+                status_code=401,
+                error_code="YOUTUBE_NOT_CONNECTED"
+            )
+
+    if oauth_doc.get("status") == "disconnected":
+        raise YouTubeAPIError(
+            message="Google OAuth account for this channel is disconnected. Please reconnect.",
+            status_code=401,
+            error_code="YOUTUBE_DISCONNECTED"
+        )
+
+    from backend.app.config import get_settings
+    settings = get_settings()
+    fernet = settings.get_fernet()
+
+    access_token = ""
+    refresh_token = ""
+
+    if oauth_doc.get("access_token_encrypted"):
+        try:
+            access_token = fernet.decrypt(oauth_doc["access_token_encrypted"].encode()).decode()
+        except Exception as e:
+            logger.warning(f"Could not decrypt stored access token for channel {channel_id}: {e}")
+
+    if oauth_doc.get("refresh_token_encrypted"):
+        try:
+            refresh_token = fernet.decrypt(oauth_doc["refresh_token_encrypted"].encode()).decode()
+        except Exception as e:
+            logger.warning(f"Could not decrypt stored refresh token for channel {channel_id}: {e}")
+
+    if not access_token and not refresh_token:
+        raise YouTubeAPIError(
+            message="Valid OAuth tokens not found for channel. Please reconnect YouTube.",
+            status_code=401,
+            error_code="YOUTUBE_TOKENS_MISSING"
+        )
+
+    target_oauth_id = oauth_doc["_id"]
+
+    async def on_token_refreshed(new_access_token: str, expires_in: Optional[int]):
+        encrypted_new = fernet.encrypt(new_access_token.encode()).decode()
+        update_data = {
+            "access_token_encrypted": encrypted_new,
+            "updated_at": datetime.now(timezone.utc)
+        }
+        if expires_in:
+            update_data["token_expires_at"] = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+        # Atomic per-account update guarantees concurrency safety across multiple accounts
+        await db.oauth_accounts.update_one(
+            {"_id": target_oauth_id},
+            {"$set": update_data}
+        )
+        logger.info(f"Persisted refreshed OAuth access token for OAuth account {target_oauth_id} to MongoDB.")
+
+    return YouTubeClient(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        client_id=settings.GOOGLE_CLIENT_ID,
+        client_secret=settings.GOOGLE_CLIENT_SECRET,
+        token_refreshed_callback=on_token_refreshed
+    )
+
+
+async def get_youtube_client_for_user(user_id: str, db) -> YouTubeClient:
+    """Backward-compatible user-level client resolution.
+    Finds first active channel for user, or resolves first active Google OAuth account.
+    """
+    user_channel = await db.channels.find_one({"user_id": user_id, "status": "connected"})
+    if user_channel:
+        return await get_youtube_client_for_channel(str(user_channel["_id"]), user_id, db)
+
+    oauth_doc = await db.oauth_accounts.find_one({"user_id": user_id, "provider": "google", "status": {"$ne": "disconnected"}})
     if not oauth_doc:
         raise YouTubeAPIError(
             message="No Google OAuth account connected for this user. Please connect YouTube.",
@@ -413,12 +571,7 @@ async def get_youtube_client_for_user(user_id: str, db) -> YouTubeClient:
         except Exception as e:
             logger.warning(f"Could not decrypt stored refresh token for user {user_id}: {e}")
 
-    if not access_token and not refresh_token:
-        raise YouTubeAPIError(
-            message="Valid OAuth tokens not found for user. Please reconnect YouTube.",
-            status_code=401,
-            error_code="YOUTUBE_TOKENS_MISSING"
-        )
+    target_oauth_id = oauth_doc["_id"]
 
     async def on_token_refreshed(new_access_token: str, expires_in: Optional[int]):
         encrypted_new = fernet.encrypt(new_access_token.encode()).decode()
@@ -429,10 +582,9 @@ async def get_youtube_client_for_user(user_id: str, db) -> YouTubeClient:
         if expires_in:
             update_data["token_expires_at"] = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
         await db.oauth_accounts.update_one(
-            {"_id": oauth_doc["_id"]},
+            {"_id": target_oauth_id},
             {"$set": update_data}
         )
-        logger.info(f"Persisted refreshed OAuth access token for user {user_id} to MongoDB.")
 
     return YouTubeClient(
         access_token=access_token,
@@ -441,4 +593,5 @@ async def get_youtube_client_for_user(user_id: str, db) -> YouTubeClient:
         client_secret=settings.GOOGLE_CLIENT_SECRET,
         token_refreshed_callback=on_token_refreshed
     )
+
 
