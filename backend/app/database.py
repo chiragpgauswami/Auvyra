@@ -68,6 +68,14 @@ class MongoDBManager:
 
             # channel_brains: compound (user_id, channel_id) (unique)
             await self.db.channel_brains.create_index([("user_id", pymongo.ASCENDING), ("channel_id", pymongo.ASCENDING)], unique=True)
+
+            # autopilot_queue: compound (channel_id, scheduled_at) and (channel_id, status)
+            await self.db.autopilot_queue.create_index([("channel_id", pymongo.ASCENDING), ("scheduled_at", pymongo.ASCENDING)])
+            await self.db.autopilot_queue.create_index([("user_id", pymongo.ASCENDING), ("status", pymongo.ASCENDING)])
+            await self.db.autopilot_queue.create_index([("channel_id", pymongo.ASCENDING), ("status", pymongo.ASCENDING)])
+
+            # niche_recommendations_cache: channel_id
+            await self.db.niche_recommendations_cache.create_index([("channel_id", pymongo.ASCENDING)], unique=True)
             
         except Exception as e:
             logger.error(f"Error creating indexes: {e}")

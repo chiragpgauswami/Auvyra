@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Dict, Any, Optional
+from bson import ObjectId
 from backend.app.auth.dependencies import require_auth
 from backend.app.database import get_db
 from backend.app.services.channel_service import ChannelService
@@ -322,3 +323,69 @@ async def rebuild_channel_brain(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Brain rebuild failed: {str(e)}")
+
+
+from backend.app.models.channel import AutopilotConfig
+
+@router.get("/{channel_id}/autopilot/niches")
+async def get_niche_recommendations(
+    channel_id: str,
+    refresh: bool = False,
+    user: dict = Depends(require_auth),
+    service: ChannelService = Depends(get_channel_service)
+):
+    """Get context-aware dynamic niche recommendations with honest source tagging and confidence."""
+    try:
+        return await service.get_niche_recommendations(str(user["_id"]), channel_id, refresh=refresh)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to generate niche recommendations: {str(e)}")
+
+@router.post("/{channel_id}/autopilot/configure")
+async def configure_autopilot(
+    channel_id: str,
+    data: AutopilotConfig,
+    user: dict = Depends(require_auth),
+    service: ChannelService = Depends(get_channel_service)
+):
+    """Validate 8-step wizard configuration, update Channel Brain, and bootstrap persistent queue."""
+    try:
+        return await service.configure_autopilot(str(user["_id"]), channel_id, data.model_dump())
+    except ValueError as e:
+        err_msg = str(e)
+        if "not found or unauthorized" in err_msg:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=err_msg)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_msg)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Configuration failed: {str(e)}")
+
+@router.get("/{channel_id}/autopilot/config")
+async def get_autopilot_config(
+    channel_id: str,
+    user: dict = Depends(require_auth),
+    service: ChannelService = Depends(get_channel_service)
+):
+    """Fetch current autopilot configuration, operational mode, and upcoming queue summary."""
+    try:
+        return await service.get_autopilot_config(str(user["_id"]), channel_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to fetch config: {str(e)}")
+
+@router.get("/{channel_id}/autopilot/queue")
+async def get_autopilot_queue(
+    channel_id: str,
+    queue_status: Optional[str] = None,
+    limit: int = 50,
+    user: dict = Depends(require_auth),
+    service: ChannelService = Depends(get_channel_service)
+):
+    """Fetch persistent scheduled queue items for this channel."""
+    try:
+        return await service.get_autopilot_queue(str(user["_id"]), channel_id, status=queue_status, limit=limit)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to fetch queue: {str(e)}")

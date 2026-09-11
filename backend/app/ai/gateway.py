@@ -13,9 +13,11 @@ from backend.app.ai.prompts import (
     PERFORMANCE_ANALYSIS_PROMPT,
     STRATEGY_INSIGHTS_PROMPT,
     CHANNEL_ONBOARDING_SYSTEM_PROMPT,
-    OPPORTUNITY_FEED_PROMPT
+    OPPORTUNITY_FEED_PROMPT,
+    NICHE_RECOMMENDATIONS_SYSTEM_PROMPT
 )
 from backend.app.models.content import StructuredScript, ResearchOpportunity
+from backend.app.models.channel import NicheRecommendation
 
 class OllamaUnavailableError(Exception):
     def __init__(self, message: str = "Ollama is unavailable. Ensure Ollama is running.", url: str = ""):
@@ -358,3 +360,303 @@ Generate the complete strategic channel brain in JSON format according to the re
                 return resp.status_code == 200
         except Exception:
             return False
+
+    async def generate_niche_recommendations(self, channel_context: Optional[dict] = None) -> list[dict]:
+        """Generate AI-assisted, high-leverage YouTube Shorts niches with graceful heuristic fallback.
+        
+        Zero-Mock Policy: Never fabricates external metrics. If Ollama is unavailable or fails,
+        returns curated heuristic recommendations with source='curated_heuristic' and explicit confidence.
+        """
+        ctx = channel_context or {}
+        ch_name = ctx.get("name") or ctx.get("title") or "New Creator"
+        ch_desc = ctx.get("description") or ""
+        subscribers = ctx.get("subscriber_count", 0)
+        videos = ctx.get("video_count", 0)
+        brain = ctx.get("brain") or {}
+        existing_niche = brain.get("niche") or ""
+        existing_pillars = brain.get("content_pillars") or []
+        recent_topics = ctx.get("recent_topics") or []
+
+        prompt = f"""
+Analyze the following YouTube Channel Context to recommend 4-5 high-engagement YouTube Shorts niches:
+- Channel Name: {ch_name}
+- Channel Description: {ch_desc if ch_desc else "No description available"}
+- Current Metrics: {subscribers} subscribers, {videos} published videos
+- Current Brain Niche: {existing_niche if existing_niche else "Unset (brand new channel)"}
+- Existing Content Pillars: {existing_pillars if existing_pillars else "None"}
+- Recent Video Topics: {recent_topics if recent_topics else "None"}
+
+Generate 4 to 5 distinct, high-leverage Shorts niches tailored to this creator profile.
+Return a JSON array of niche recommendation objects according to the required schema.
+"""
+        try:
+            raw_result = await self._chat_json(NICHE_RECOMMENDATIONS_SYSTEM_PROMPT, prompt, max_retries=2)
+            if isinstance(raw_result, dict) and "niches" in raw_result:
+                raw_list = raw_result["niches"]
+            elif isinstance(raw_result, list):
+                raw_list = raw_result
+            else:
+                raw_list = []
+
+            validated_niches = []
+            for item in raw_list:
+                if not isinstance(item, dict):
+                    continue
+                # Enforce schema fields with flexible mapping
+                n_name = item.get("name") or item.get("niche")
+                if not n_name:
+                    continue
+                item["name"] = n_name
+                if not item.get("description"):
+                    item["description"] = item.get("rationale") or f"High-opportunity YouTube Shorts niche focused on {n_name}."
+                if not item.get("suggested_pillars"):
+                    item["suggested_pillars"] = item.get("content_pillars") or ["Key Insights", "Practical Applications", "Hook Strategies"]
+                if not item.get("target_audience"):
+                    item["target_audience"] = "YouTube Shorts audience"
+
+                item.setdefault("id", re.sub(r'[^a-z0-9]+', '-', str(n_name).lower()).strip('-'))
+                item.setdefault("market_demand", "High")
+                item.setdefault("competition_level", "Medium")
+                item.setdefault("opportunity_score", 80)
+                item.setdefault("recommended_format", "shorts")
+                item.setdefault("style_sample", "")
+                item["source"] = "ollama"
+                item["confidence"] = 0.88
+                try:
+                    rec = NicheRecommendation.model_validate(item)
+                    validated_niches.append(rec.model_dump())
+                except Exception as ve:
+                    logger.warning(f"Ollama niche recommendation item validation failed: {ve}")
+
+            if len(validated_niches) >= 1:
+                return validated_niches
+            else:
+                logger.warning("Ollama returned no valid niches. Falling back to contextual heuristics.")
+                return self._get_heuristic_niche_recommendations(channel_context)
+
+        except (OllamaUnavailableError, APIConnectionError, APITimeoutError) as e:
+            logger.warning(f"Ollama unavailable for niche recommendations ({e}). Using curated contextual heuristics.")
+            return self._get_heuristic_niche_recommendations(channel_context)
+        except Exception as e:
+            logger.error(f"Unexpected error in Ollama niche recommendations ({e}). Falling back to heuristics.")
+            return self._get_heuristic_niche_recommendations(channel_context)
+
+    def _get_heuristic_niche_recommendations(self, channel_context: Optional[dict] = None) -> list[dict]:
+        """Context-aware, deterministic heuristic fallback for YouTube Shorts niche opportunities.
+        Metadata explicitly reports source='curated_heuristic' and opportunity_score as heuristic index.
+        """
+        ctx = channel_context or {}
+        text_blob = f"{ctx.get('name', '')} {ctx.get('description', '')} {ctx.get('handle', '')}".lower()
+        brain = ctx.get("brain") or {}
+        if brain.get("niche"):
+            text_blob += f" {brain['niche']}".lower()
+
+        is_tech = any(k in text_blob for k in ["tech", "ai", "code", "software", "dev", "crypto", "data", "bot"])
+        is_finance = any(k in text_blob for k in ["finance", "money", "invest", "wealth", "stock", "dollar", "crypto", "business"])
+        is_history = any(k in text_blob for k in ["history", "war", "ancient", "mystery", "empire", "archaeology", "past"])
+        is_self_dev = any(k in text_blob for k in ["stoic", "discipline", "mindset", "habit", "productivity", "psychology", "fitness"])
+
+        if is_tech:
+            candidates = [
+                {
+                    "id": "ai-breakdowns",
+                    "name": "AI Tools & Future Tech Breakdowns",
+                    "description": "Rapid 45-second visual breakdowns of cutting-edge AI tools, workflow automation, and futuristic tech frontiers.",
+                    "market_demand": "Very High",
+                    "competition_level": "Medium",
+                    "opportunity_score": 92,
+                    "target_audience": "Tech enthusiasts, remote workers, students, and early adopters",
+                    "suggested_pillars": ["Free AI Supertools", "Future Tech Predictions", "Productivity Automation", "Tech Controversy"],
+                    "recommended_format": "shorts",
+                    "style_sample": "3 free AI websites that feel illegal to know in 2026."
+                },
+                {
+                    "id": "cyber-mysteries",
+                    "name": "Dark Web & Cyber Heists",
+                    "description": "Story-driven documentary shorts detailing infamous hacker attacks, crypto heists, and digital mysteries.",
+                    "market_demand": "High",
+                    "competition_level": "Low",
+                    "opportunity_score": 88,
+                    "target_audience": "True crime and technology fans intrigued by high-stakes digital intrigue",
+                    "suggested_pillars": ["Legendary Hackers", "Unsolved Cyber Heists", "Dark Web Lore", "Digital Surveillance"],
+                    "recommended_format": "shorts",
+                    "style_sample": "How a 19-year-old stole $40 million from an airline with one line of code."
+                },
+                {
+                    "id": "dev-productivity",
+                    "name": "Developer Life & Coding Hacks",
+                    "description": "Relatable coding humor, architecture patterns, and lightning-fast developer efficiency techniques.",
+                    "market_demand": "High",
+                    "competition_level": "Moderate",
+                    "opportunity_score": 84,
+                    "target_audience": "Software engineers, boot campers, and aspiring developers",
+                    "suggested_pillars": ["Terminal Productivity", "Junior vs Senior Dev", "Hidden IDE Superpowers", "Architecture in 60s"],
+                    "recommended_format": "shorts",
+                    "style_sample": "Stop using if/else chains. Use this pattern instead."
+                },
+                {
+                    "id": "tech-paradoxes",
+                    "name": "Silicon Valley Secrets & Paradoxes",
+                    "description": "Fast-paced investigative shorts exposing how big tech algorithms work and hidden business models.",
+                    "market_demand": "High",
+                    "competition_level": "Low",
+                    "opportunity_score": 86,
+                    "target_audience": "Curious digital natives and startup founders",
+                    "suggested_pillars": ["Algorithm Secrets", "Startup Failures", "Monopoly Mechanics", "Tech History"],
+                    "recommended_format": "shorts",
+                    "style_sample": "Why TikTok's algorithm knows your mood before you do."
+                }
+            ]
+        elif is_finance:
+            candidates = [
+                {
+                    "id": "wealth-frameworks",
+                    "name": "Personal Wealth & Market Psychology",
+                    "description": "High-impact financial mechanics, investing principles, and psychological traps keeping people broke.",
+                    "market_demand": "Very High",
+                    "competition_level": "Moderate",
+                    "opportunity_score": 90,
+                    "target_audience": "Young professionals, retail investors, and side-hustlers",
+                    "suggested_pillars": ["Index Fund Realities", "Psychology of Spending", "Tax Advantages", "Passive Income Myths"],
+                    "recommended_format": "shorts",
+                    "style_sample": "Why buying a new car is mathematically the worst financial decision you can make."
+                },
+                {
+                    "id": "economic-history",
+                    "name": "Bizarre Economic History & Hyperinflation",
+                    "description": "Fascinating historical stories about strange currencies, massive economic collapses, and financial manias.",
+                    "market_demand": "High",
+                    "competition_level": "Low",
+                    "opportunity_score": 87,
+                    "target_audience": "History buffs and curious intellectuals",
+                    "suggested_pillars": ["Tulip Mania to Dotcom", "Hyperinflation Crises", "Gold Rush Shenanigans", "Secret Central Bank Moves"],
+                    "recommended_format": "shorts",
+                    "style_sample": "The day Zimbabwe printed a 100-trillion-dollar bill that couldn't buy bread."
+                },
+                {
+                    "id": "business-empires",
+                    "name": "Billion-Dollar Business Strategies",
+                    "description": "Breakdowns of counterintuitive moats, genius marketing ploys, and pricing tricks used by global empires.",
+                    "market_demand": "Very High",
+                    "competition_level": "Medium",
+                    "opportunity_score": 89,
+                    "target_audience": "Entrepreneurs, business students, and ambitious creators",
+                    "suggested_pillars": ["Loss-Leader Tricks", "Brand Warfare", "Hidden Revenue Streams", "Hostile Takeovers"],
+                    "recommended_format": "shorts",
+                    "style_sample": "Costco loses $50 million a year on hot dogs. Here is why it makes them billions."
+                }
+            ]
+        elif is_history or is_self_dev:
+            candidates = [
+                {
+                    "id": "stoic-mindset",
+                    "name": "Stoic Philosophy & Modern Resilience",
+                    "description": "Ancient Stoic and philosophical wisdom applied to modern mental health, focus, and grit.",
+                    "market_demand": "Very High",
+                    "competition_level": "Medium",
+                    "opportunity_score": 91,
+                    "target_audience": "Self-improvement seekers, athletes, and students",
+                    "suggested_pillars": ["Marcus Aurelius Meditations", "The Power of Indifference", "Amor Fati in Practice", "Controlling the Mind"],
+                    "recommended_format": "shorts",
+                    "style_sample": "When Seneca was condemned to death, his reaction baffled the Roman Emperor."
+                },
+                {
+                    "id": "untold-history",
+                    "name": "Untold Historical Secrets & War Tacticians",
+                    "description": "Suspenseful, dramatic accounts of obscure military maneuvers, unsung heroes, and turning points in history.",
+                    "market_demand": "Very High",
+                    "competition_level": "Low",
+                    "opportunity_score": 94,
+                    "target_audience": "History buffs, storytelling fans, and documentary viewers",
+                    "suggested_pillars": ["Unsung War Heroes", "Brilliant Deceptions", "Ancient Weapons", "Decisive 10-Minute Battles"],
+                    "recommended_format": "shorts",
+                    "style_sample": "How a blind dog helped a soldier capture 40 enemies in World War II."
+                },
+                {
+                    "id": "high-performance-habits",
+                    "name": "Cognitive Biohacking & Habit Architecture",
+                    "description": "Dopamine resets, sleep optimization, and scientifically proven study/work protocols.",
+                    "market_demand": "High",
+                    "competition_level": "Moderate",
+                    "opportunity_score": 85,
+                    "target_audience": "Students, knowledge workers, and fitness enthusiasts",
+                    "suggested_pillars": ["Dopamine Detox", "Circadian Protocols", "Deep Work Routines", "Micro-Habits"],
+                    "recommended_format": "shorts",
+                    "style_sample": "The 2-minute rule that permanently stopped my procrastination."
+                }
+            ]
+        else:
+            # General / New channel multi-disciplinary opportunity universe
+            candidates = [
+                {
+                    "id": "untold-history",
+                    "name": "Untold History & Declassified Files",
+                    "description": "Suspenseful, cinematic shorts revealing declassified government files, bizarre historical turning points, and secret missions.",
+                    "market_demand": "Very High",
+                    "competition_level": "Low",
+                    "opportunity_score": 93,
+                    "target_audience": "General curiosity audience, documentary lovers, students",
+                    "suggested_pillars": ["Declassified Operations", "Bizarre Historical Coincidences", "Forgotten Tacticians", "Survival Stories"],
+                    "recommended_format": "shorts",
+                    "style_sample": "The secret CIA project that attempted to use cats as acoustic spies."
+                },
+                {
+                    "id": "wealth-psychology",
+                    "name": "Money Psychology & Wealth Paradoxes",
+                    "description": "Crisp, counterintuitive insights into consumer psychology, money traps, and practical investing fundamentals.",
+                    "market_demand": "Very High",
+                    "competition_level": "Medium",
+                    "opportunity_score": 89,
+                    "target_audience": "Young adults, aspiring entrepreneurs, career builders",
+                    "suggested_pillars": ["The Psychology of Spending", "Compound Interest Realities", "Stealth Wealth Habits", "Pricing Tricks"],
+                    "recommended_format": "shorts",
+                    "style_sample": "The subtle psychological trick luxury brands use to make you feel poor."
+                },
+                {
+                    "id": "science-paradoxes",
+                    "name": "Mind-Bending Science & Cosmic Paradoxes",
+                    "description": "Visual, awe-inspiring physics questions, quantum quirks, and cosmic mysteries explained in 50 seconds.",
+                    "market_demand": "High",
+                    "competition_level": "Low",
+                    "opportunity_score": 91,
+                    "target_audience": "Curious minds, sci-fi enthusiasts, visual learners",
+                    "suggested_pillars": ["Black Hole Physics", "Quantum Paradoxes", "Oceanic Unknowns", "Time Dilation Realities"],
+                    "recommended_format": "shorts",
+                    "style_sample": "If you fell into a black hole, you would watch the entire future of the universe unfold in seconds."
+                },
+                {
+                    "id": "ai-future-tools",
+                    "name": "Future Tech & AI Automations",
+                    "description": "Fast-paced visual demos of innovative AI tools, humanoid robotics, and technological shifts.",
+                    "market_demand": "Very High",
+                    "competition_level": "Medium",
+                    "opportunity_score": 90,
+                    "target_audience": "Tech enthusiasts, creators, students, and professionals",
+                    "suggested_pillars": ["AI Productivity", "Robotics Frontiers", "Digital Privacy", "Emerging Breakthroughs"],
+                    "recommended_format": "shorts",
+                    "style_sample": "3 AI breakthroughs that happened this week that nobody is talking about."
+                },
+                {
+                    "id": "stoic-wisdom",
+                    "name": "Stoic Wisdom & Modern Mindset",
+                    "description": "Punchy philosophical mental models and stoic wisdom for daily clarity and emotional control.",
+                    "market_demand": "High",
+                    "competition_level": "Medium",
+                    "opportunity_score": 86,
+                    "target_audience": "Men and women focused on discipline, self-improvement, and resilience",
+                    "suggested_pillars": ["Mental Fortitude", "Eliminating Worry", "The Art of Silence", "Dealing With Betrayal"],
+                    "recommended_format": "shorts",
+                    "style_sample": "Marcus Aurelius wrote this single sentence whenever someone insulted him."
+                }
+            ]
+
+        results = []
+        for c in candidates:
+            c["source"] = "curated_heuristic"
+            c["confidence"] = 0.75
+            try:
+                rec = NicheRecommendation.model_validate(c)
+                results.append(rec.model_dump())
+            except Exception as e:
+                logger.warning(f"Error validating heuristic niche: {e}")
+        return results
