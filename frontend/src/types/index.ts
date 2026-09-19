@@ -14,6 +14,7 @@ export interface Channel {
   description: string;
   status: string;
   autopilot_enabled: boolean;
+  autopilot_config?: any;
   youtube_channel_id?: string | null;
   thumbnail_url?: string | null;
   subscriber_count?: number;

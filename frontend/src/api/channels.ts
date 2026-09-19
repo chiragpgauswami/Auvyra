@@ -85,3 +85,76 @@ export const rebuildChannelBrain = async (
   );
   return response.data;
 };
+
+export interface NicheRecommendation {
+  id: string;
+  name: string;
+  description: string;
+  market_demand: string;
+  competition_level: string;
+  opportunity_score: number;
+  target_audience: string;
+  suggested_pillars: string[];
+  recommended_format: string;
+  style_sample: string;
+  source: string;
+  confidence: number;
+}
+
+export interface AutopilotConfigPayload {
+  mode: "off" | "assisted" | "full_autopilot";
+  format: "shorts" | "longform";
+  niche: string;
+  custom_niche?: string | null;
+  target_audience?: string;
+  tone?: string;
+  language?: string;
+  target_geography?: string;
+  content_pillars?: string[];
+  schedule: {
+    frequency_per_week: number;
+    timezone: string;
+    days_of_week: number[];
+    times: string[];
+  };
+  approval_required?: boolean;
+  privacy_status?: "private" | "unlisted" | "public";
+  tags?: string[];
+}
+
+export const getAutopilotNiches = async (
+  channelId: string,
+  refresh: boolean = false,
+): Promise<NicheRecommendation[]> => {
+  const response = await client.get<NicheRecommendation[]>(
+    `/channels/${channelId}/autopilot/niches?refresh=${refresh}`,
+  );
+  return response.data;
+};
+
+export const configureAutopilot = async (
+  channelId: string,
+  config: AutopilotConfigPayload,
+): Promise<any> => {
+  const response = await client.post(
+    `/channels/${channelId}/autopilot/configure`,
+    config,
+  );
+  return response.data;
+};
+
+export const getAutopilotConfig = async (channelId: string): Promise<any> => {
+  const response = await client.get(`/channels/${channelId}/autopilot/config`);
+  return response.data;
+};
+
+export const getAutopilotQueue = async (
+  channelId: string,
+  status?: string,
+): Promise<any[]> => {
+  const query = status ? `?status=${status}` : "";
+  const response = await client.get<any[]>(
+    `/channels/${channelId}/autopilot/queue${query}`,
+  );
+  return response.data;
+};

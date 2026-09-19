@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from typing import List, Dict, Any, Optional
 from bson import ObjectId
 from backend.app.auth.dependencies import require_auth
@@ -377,7 +377,7 @@ async def get_autopilot_config(
 @router.get("/{channel_id}/autopilot/queue")
 async def get_autopilot_queue(
     channel_id: str,
-    queue_status: Optional[str] = None,
+    queue_status: Optional[str] = Query(None, alias="status"),
     limit: int = 50,
     user: dict = Depends(require_auth),
     service: ChannelService = Depends(get_channel_service)

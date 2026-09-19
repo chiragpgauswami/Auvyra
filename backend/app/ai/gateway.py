@@ -391,12 +391,21 @@ Return a JSON array of niche recommendation objects according to the required sc
 """
         try:
             raw_result = await self._chat_json(NICHE_RECOMMENDATIONS_SYSTEM_PROMPT, prompt, max_retries=2)
-            if isinstance(raw_result, dict) and "niches" in raw_result:
-                raw_list = raw_result["niches"]
+            raw_list = []
+            if isinstance(raw_result, dict):
+                if "niches" in raw_result and isinstance(raw_result["niches"], list):
+                    raw_list = raw_result["niches"]
+                elif "recommendations" in raw_result and isinstance(raw_result["recommendations"], list):
+                    raw_list = raw_result["recommendations"]
+                elif "name" in raw_result or "niche" in raw_result:
+                    raw_list = [raw_result]
+                else:
+                    for val in raw_result.values():
+                        if isinstance(val, list) and val and isinstance(val[0], dict):
+                            raw_list = val
+                            break
             elif isinstance(raw_result, list):
                 raw_list = raw_result
-            else:
-                raw_list = []
 
             validated_niches = []
             for item in raw_list:

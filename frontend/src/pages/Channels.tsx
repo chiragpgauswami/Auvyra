@@ -3,14 +3,14 @@ import {
   CheckCircle2,
   Plus,
   RefreshCw,
+  Sliders,
   Tv,
   Unlink,
   Zap,
-  Power,
-  Play
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import toast from "react-hot-toast";
+import { toggleAutopilot, triggerAutopilot } from "../api/autopilot";
 import {
   createChannel,
   disconnectYoutube,
@@ -19,7 +19,7 @@ import {
   syncYoutubeChannel,
   YouTubeStatus,
 } from "../api/channels";
-import { toggleAutopilot, triggerAutopilot } from "../api/autopilot";
+import { AutopilotWizardModal } from "../components/AutopilotWizardModal";
 import Card from "../components/Card";
 import EmptyState from "../components/EmptyState";
 import Modal from "../components/Modal";
@@ -35,28 +35,42 @@ const Channels = () => {
   );
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newChannel, setNewChannel] = useState({ name: "", description: "" });
-  const [runningAutopilotId, setRunningAutopilotId] = useState<string | null>(null);
+  const [runningAutopilotId, setRunningAutopilotId] = useState<string | null>(
+    null,
+  );
+  const [wizardChannel, setWizardChannel] = useState<Channel | null>(null);
 
   const handleToggleAutopilot = async (channel: Channel) => {
     const nextState = !channel.autopilot_enabled;
     try {
       await toggleAutopilot(channel.id, nextState);
-      toast.success(`Autopilot ${nextState ? "activated" : "paused"} for ${channel.name}`);
+      toast.success(
+        `Autopilot ${nextState ? "activated" : "paused"} for ${channel.name}`,
+      );
       await loadData();
     } catch (err: any) {
-      toast.error(err.response?.data?.detail?.message || "Failed to toggle autopilot");
+      toast.error(
+        err.response?.data?.detail?.message || "Failed to toggle autopilot",
+      );
     }
   };
 
   const handleRunAutopilot = async (channel: Channel) => {
     setRunningAutopilotId(channel.id);
-    const toastId = toast.loading(`Running full Autopilot cycle for ${channel.name}...`);
+    const toastId = toast.loading(
+      `Running full Autopilot cycle for ${channel.name}...`,
+    );
     try {
       const res = await triggerAutopilot(channel.id);
-      toast.success(`Autopilot completed! Generated: "${res.title}"`, { id: toastId });
+      toast.success(`Autopilot completed! Generated: "${res.title}"`, {
+        id: toastId,
+      });
       await loadData();
     } catch (err: any) {
-      const msg = err.response?.data?.detail?.message || err.message || "Autopilot run failed";
+      const msg =
+        err.response?.data?.detail?.message ||
+        err.message ||
+        "Autopilot run failed";
       toast.error(`Autopilot error: ${msg}`, { id: toastId });
     } finally {
       setRunningAutopilotId(null);
@@ -360,18 +374,28 @@ const Channels = () => {
                       type="button"
                       onClick={() => handleToggleAutopilot(channel)}
                       className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                        channel.autopilot_enabled ? "bg-emerald-500" : "bg-slate-700"
+                        channel.autopilot_enabled
+                          ? "bg-emerald-500"
+                          : "bg-slate-700"
                       }`}
                     >
                       <span
                         className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                          channel.autopilot_enabled ? "translate-x-4" : "translate-x-0"
+                          channel.autopilot_enabled
+                            ? "translate-x-4"
+                            : "translate-x-0"
                         }`}
                       />
                     </button>
                     <span className="text-xs font-medium text-slate-300">
                       Autopilot:{" "}
-                      <span className={channel.autopilot_enabled ? "text-emerald-400 font-semibold" : "text-slate-500"}>
+                      <span
+                        className={
+                          channel.autopilot_enabled
+                            ? "text-emerald-400 font-semibold"
+                            : "text-slate-500"
+                        }
+                      >
                         {channel.autopilot_enabled ? "Active" : "Paused"}
                       </span>
                     </span>
@@ -385,12 +409,24 @@ const Channels = () => {
                 <div className="flex gap-2">
                   <button
                     type="button"
+                    onClick={() => setWizardChannel(channel)}
+                    className="flex-1 btn-secondary text-xs py-2 flex items-center justify-center gap-1.5 border-blue-800/60 text-blue-300 hover:bg-blue-950/40"
+                  >
+                    <Sliders className="w-3.5 h-3.5 text-blue-400" />
+                    Autopilot Wizard
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => handleRunAutopilot(channel)}
                     disabled={runningAutopilotId === channel.id}
-                    className="w-full btn-primary text-xs py-2 flex items-center justify-center gap-1.5"
+                    className="flex-1 btn-primary text-xs py-2 flex items-center justify-center gap-1.5"
                   >
-                    <Zap className={`w-3.5 h-3.5 ${runningAutopilotId === channel.id ? "animate-spin" : "text-amber-400"}`} />
-                    {runningAutopilotId === channel.id ? "Running Cycle..." : "Run Autopilot Cycle"}
+                    <Zap
+                      className={`w-3.5 h-3.5 ${runningAutopilotId === channel.id ? "animate-spin" : "text-amber-400"}`}
+                    />
+                    {runningAutopilotId === channel.id
+                      ? "Running Cycle..."
+                      : "Run Autopilot Cycle"}
                   </button>
                 </div>
               </div>
@@ -445,6 +481,13 @@ const Channels = () => {
           </div>
         </form>
       </Modal>
+
+      <AutopilotWizardModal
+        isOpen={!!wizardChannel}
+        onClose={() => setWizardChannel(null)}
+        channel={wizardChannel}
+        onConfigured={() => loadData()}
+      />
     </div>
   );
 };

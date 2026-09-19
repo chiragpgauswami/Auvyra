@@ -413,3 +413,4 @@ async def test_api_get_queue_and_config_endpoints(test_db, api_client):
     assert queue_items[0]["channel_id"] == ch_id
     assert queue_items[0]["pillar"] == "Legions"
     assert queue_items[0]["status"] == "pending"
+

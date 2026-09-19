@@ -250,3 +250,4 @@ def test_timezone_conversion_slot_calculation():
     assert utc_dt.hour == 5
     assert utc_dt.minute == 0
     assert utc_dt.tzinfo == timezone.utc
+
