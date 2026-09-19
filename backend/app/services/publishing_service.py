@@ -97,9 +97,11 @@ class PublishingService:
                     display_status = "Scheduled — Video not generated"
 
                 title = vid.get("title") or item.get("topic") or "Scheduled Short"
-                thumb_url = vid.get("thumbnail_url") or vid.get("thumbnail_path")
+                thumb_url = vid.get("thumbnail_url")
                 if not thumb_url and v_id and vid.get("thumbnail_path"):
                     thumb_url = f"/api/videos/{v_id}/thumbnail"
+                elif not thumb_url:
+                    thumb_url = vid.get("thumbnail_path")
 
                 events.append({
                     "queue_item_id": q_id,
@@ -134,9 +136,11 @@ class PublishingService:
             raw_status = j.get("status", "pending")
             display_status = "Published" if raw_status == "published" else ("Failed" if raw_status == "failed" else "Scheduled for Upload")
 
-            thumb_url = vid.get("thumbnail_url") or vid.get("thumbnail_path")
+            thumb_url = vid.get("thumbnail_url")
             if not thumb_url and v_id and vid.get("thumbnail_path"):
                 thumb_url = f"/api/videos/{v_id}/thumbnail"
+            elif not thumb_url:
+                thumb_url = vid.get("thumbnail_path")
 
             events.append({
                 "queue_item_id": str(j.get("_id")),

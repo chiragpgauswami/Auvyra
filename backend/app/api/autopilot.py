@@ -3,6 +3,7 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 from bson import ObjectId
 
+from loguru import logger
 from backend.app.auth.dependencies import require_auth
 from backend.app.database import get_db
 from backend.app.config import get_settings
@@ -51,6 +52,22 @@ async def toggle_autopilot(
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail={"code": "BAD_REQUEST", "message": str(e)})
+
+@router.post("/{channel_id}/trigger")
+async def trigger_autopilot_cycle(
+    channel_id: str,
+    user: dict = Depends(require_auth),
+    service: AutopilotService = Depends(get_autopilot_service)
+):
+    """Executes one complete on-demand autonomous YouTube cycle for the channel."""
+    try:
+        res = await service.run_autopilot_cycle(user_id=str(user["_id"]), channel_id=channel_id)
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_NOT_FOUND", "message": str(e)})
+    except Exception as e:
+        logger.exception(f"Autopilot trigger execution failed: {e}")
+        raise HTTPException(status_code=500, detail={"code": "AUTOPILOT_TRIGGER_FAILED", "message": str(e)})
 
 @router.get("/{channel_id}/status")
 async def get_autopilot_status(

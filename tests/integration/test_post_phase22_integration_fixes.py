@@ -39,24 +39,28 @@ async def test_video_repo_channel_id_none_queries_all_user_videos(test_db):
     ch_1 = str(ObjectId())
     ch_2 = str(ObjectId())
 
+    t0 = datetime(2026, 9, 20, 10, 0, 0, tzinfo=timezone.utc)
     # User A videos
     v1 = await video_repo.insert_one({
         "user_id": user_a,
         "channel_id": ch_1,
         "title": "Video 1 Channel 1",
-        "status": "generated"
+        "status": "generated",
+        "created_at": t0
     })
     v2 = await video_repo.insert_one({
         "user_id": user_a,
         "channel_id": ch_2,
         "title": "Video 2 Channel 2",
-        "status": "generated"
+        "status": "generated",
+        "created_at": t0 + timedelta(minutes=1)
     })
     v3 = await video_repo.insert_one({
         "user_id": user_a,
         "channel_id": None,
         "title": "Video 3 No Channel",
-        "status": "ready"
+        "status": "ready",
+        "created_at": t0 + timedelta(minutes=2)
     })
 
     # User B video (should never leak)
@@ -284,3 +288,35 @@ def test_caption_margin_padding_proportions():
     assert len(lines) >= 2
     for line in lines:
         assert len(line) <= 28
+
+
+@pytest.mark.asyncio
+async def test_autopilot_trigger_endpoint_contract(test_db):
+    """
+    Verify POST /api/autopilot/{channel_id}/trigger endpoint exists and
+    executes run_autopilot_cycle or reports channel not found properly (not 404 route missing).
+    """
+    from unittest.mock import AsyncMock
+    from backend.app.services.autopilot_service import AutopilotService
+    from backend.app.api.autopilot import trigger_autopilot_cycle
+
+    user_id = str(ObjectId())
+    channel_id = str(ObjectId())
+    user = {"_id": ObjectId(user_id)}
+
+    mock_service = AsyncMock(spec=AutopilotService)
+    mock_service.run_autopilot_cycle = AsyncMock(return_value={
+        "status": "completed",
+        "title": "Quantum AI Secrets",
+        "channel_id": channel_id
+    })
+
+    res = await trigger_autopilot_cycle(
+        channel_id=channel_id,
+        user=user,
+        service=mock_service
+    )
+    assert res["status"] == "completed"
+    assert res["title"] == "Quantum AI Secrets"
+    mock_service.run_autopilot_cycle.assert_awaited_once_with(user_id=user_id, channel_id=channel_id)
+
