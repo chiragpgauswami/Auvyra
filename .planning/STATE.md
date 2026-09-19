@@ -1,9 +1,9 @@
 # Auvyra Project State
 
-**Last Updated:** 2026-09-11  
+**Last Updated:** 2026-09-19  
 **Current Milestone:** Milestone 2 — Channel-Centric Autonomous YouTube Operating System  
-**Current Phase:** Phase 18 (Multi-Account OAuth & Channel-Centric Data Model) — ACTIVE  
-**Next Phase:** Phase 19 (AI Niche Discovery & Autopilot Setup Wizard Engine)
+**Current Phase:** Phase 20 (Persistent Autopilot Scheduler & Granular Job Pipeline) — COMPLETED  
+**Next Phase:** Phase 21 (High-Retention Shorts Captions & Stock Composition)
 
 ---
 
@@ -33,14 +33,14 @@
 
 ### Milestone 2: Channel-Centric Autonomous YouTube Operating System (Phases 18–23) — IN PROGRESS
 
-| Phase  | Description                                        |   Status    | Verification                                                            |
-| :----: | :------------------------------------------------- | :---------: | :---------------------------------------------------------------------- |
-| **18** | Multi-Account OAuth & Channel-Centric Data Model   | **ACTIVE**  | Multi-Google connection support, `oauth_account_id` channel mapping     |
-| **19** | AI Niche Discovery & Autopilot Setup Wizard Engine | **PENDING** | AI niche suggestions, `AutopilotConfig` model, Content Plan generation  |
-| **20** | Persistent Autopilot Scheduler & Job Pipeline      | **PENDING** | Durable background scheduler, granular job states, no swallowed errors  |
-| **21** | High-Retention Shorts Captions & Stock Composition | **PENDING** | Punchy multi-word captions, Pexels asset metadata persistence, QA       |
-| **22** | Channel Control Center & Frontend Autopilot Wizard | **PENDING** | `/channels/:id` control center, 8-step wizard modal, live activity feed |
-| **23** | Full Autonomous Acceptance & Browser Certification | **PENDING** | End-to-end multi-channel browser acceptance, CodeRabbit review gate     |
+| Phase  | Description                                        |    Status     | Verification                                                                  |
+| :----: | :------------------------------------------------- | :-----------: | :---------------------------------------------------------------------------- |
+| **18** | Multi-Account OAuth & Channel-Centric Data Model   | **COMPLETED** | 100% isolation, `oauth_account_id` ownership invariant, 12 integration tests   |
+| **19** | AI Niche Discovery & Autopilot Setup Wizard Engine | **COMPLETED** | Real Ollama discovery, 7-day timezone schedule, 22 unit + integration tests    |
+| **20** | Persistent Autopilot Scheduler & Job Pipeline      | **COMPLETED** | 14 durable stages, QA gate, 76/76 unit+int tests, real pipeline audit script |
+| **21** | High-Retention Shorts Captions & Stock Composition |  **PENDING**  | Punchy multi-word captions, Pexels asset metadata persistence, QA             |
+| **22** | Channel Control Center & Frontend Autopilot Wizard |  **PENDING**  | `/channels/:id` control center, 8-step wizard modal, live activity feed       |
+| **23** | Full Autonomous Acceptance & Browser Certification |  **PENDING**  | End-to-end multi-channel browser acceptance, CodeRabbit review gate           |
 
 ---
 
@@ -48,11 +48,11 @@
 
 - **Live YouTube Authorization:** Google Cloud interactive consent requires manual user approval in the browser. In automated test environments, marked as honest `[BLOCKED]` without mocks.
 - **Pexels Stock Coverage:** Fully operational with live API access (`PEXELS_API_KEY` active).
+- **Ollama AI Runtime:** Fully operational locally on `http://localhost:11434` (`llama3.1:8b`).
 
 ---
 
 ## Next Steps
 
-1. Execute **Phase 18: Multi-Account OAuth & Channel-Centric Data Model**.
-2. Execute **Phase 19: AI Niche Discovery & Autopilot Setup Wizard Engine**.
-3. Advance sequentially through Phases 20–23.
+1. Review and sign off Phase 20 completion.
+2. Advance sequentially to **Phase 21: High-Retention Shorts Captions & Stock Composition**.

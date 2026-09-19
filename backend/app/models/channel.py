@@ -1,6 +1,6 @@
 from enum import Enum
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import Optional, List, Any
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -98,13 +98,28 @@ class AutopilotQueueItem(BaseModel):
     format: str = "shorts"
     pillar: str
     topic: str
-    status: str = "pending"  # pending, in_production, ready_for_approval, approved, published, failed
+    status: str = "pending"  # pending, in_production, researching, scripting, storyboarding, media, tts, subtitles, rendering, qa, ready_for_approval, publishing, published, retrying, failed
     priority: int = 1
     source: str = "autopilot_bootstrap"
     config_version: int = 1
     created_at: datetime
     updated_at: datetime
     production_job_id: str | None = None
+    stages: dict[str, dict] = Field(default_factory=dict)
+    current_stage: str = "pending"
+    progress: int = 0
+    claimed_at: datetime | None = None
+    claimed_by: str | None = None
+    heartbeat_at: datetime | None = None
+    lease_expires_at: datetime | None = None
+    attempts: int = 0
+    max_attempts: int = 3
+    last_error: dict | None = None
+    failure_reason: str | None = None
+    video_id: str | None = None
+    published_at: datetime | None = None
+    youtube_url: str | None = None
+    artifacts: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChannelCreate(BaseModel):

@@ -8,6 +8,7 @@ class JobStatus(str, Enum):
     completed = "completed"
     failed = "failed"
     cancelled = "cancelled"
+    retrying = "retrying"
 
 class JobType(str, Enum):
     video_generation = "video_generation"
@@ -16,6 +17,8 @@ class JobType(str, Enum):
     publishing = "publishing"
     analytics_sync = "analytics_sync"
     learning = "learning"
+    autopilot_orchestration = "autopilot_orchestration"
+    autopilot_stage = "autopilot_stage"
 
 class Job(BaseModel):
     id: str = Field(alias="_id")
@@ -32,6 +35,19 @@ class Job(BaseModel):
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
+
+class AutopilotEvent(BaseModel):
+    id: str = Field(alias="_id", default=None)
+    channel_id: str
+    user_id: str
+    queue_item_id: str
+    stage: str
+    status: str  # "started", "progress", "completed", "failed", "retrying"
+    progress: int = 0
+    message: str = ""
+    metadata: dict = Field(default_factory=dict)
+    error: dict | None = None
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 class Notification(BaseModel):
     id: str = Field(alias="_id")

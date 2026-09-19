@@ -8,6 +8,8 @@ from backend.app.workers.script_worker import ScriptWorker
 from backend.app.workers.publishing_worker import PublishingWorker
 from backend.app.workers.analytics_worker import AnalyticsWorker
 from backend.app.workers.learning_worker import LearningWorker
+from backend.app.workers.scheduler_worker import SchedulerWorker
+from backend.app.workers.autopilot_worker import AutopilotWorker
 
 async def run_workers(worker_types: list[str] | None = None):
     """Start specified workers (or all) and run until stopped."""
@@ -25,6 +27,8 @@ async def run_workers(worker_types: list[str] | None = None):
         "publishing": PublishingWorker,
         "analytics_sync": AnalyticsWorker,
         "learning": LearningWorker,
+        "scheduler": SchedulerWorker,
+        "autopilot": AutopilotWorker,
     }
     
     types_to_run = worker_types or list(all_worker_classes.keys())

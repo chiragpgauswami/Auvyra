@@ -73,6 +73,11 @@ class MongoDBManager:
             await self.db.autopilot_queue.create_index([("channel_id", pymongo.ASCENDING), ("scheduled_at", pymongo.ASCENDING)])
             await self.db.autopilot_queue.create_index([("user_id", pymongo.ASCENDING), ("status", pymongo.ASCENDING)])
             await self.db.autopilot_queue.create_index([("channel_id", pymongo.ASCENDING), ("status", pymongo.ASCENDING)])
+            await self.db.autopilot_queue.create_index([("status", pymongo.ASCENDING), ("scheduled_at", pymongo.ASCENDING)])
+
+            # autopilot_events: append-only telemetry stream
+            await self.db.autopilot_events.create_index([("channel_id", pymongo.ASCENDING), ("timestamp", pymongo.DESCENDING)])
+            await self.db.autopilot_events.create_index([("queue_item_id", pymongo.ASCENDING), ("timestamp", pymongo.ASCENDING)])
 
             # niche_recommendations_cache: channel_id
             await self.db.niche_recommendations_cache.create_index([("channel_id", pymongo.ASCENDING)], unique=True)
