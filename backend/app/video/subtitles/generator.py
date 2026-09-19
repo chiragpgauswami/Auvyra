@@ -200,13 +200,14 @@ class SubtitleGenerator:
         audio_file: str,
         output_srt: str,
         word_level: bool = True,
-        shorts_cadence: bool = True
+        shorts_cadence: bool = True,
+        max_words_per_cue: int = 3
     ):
         """Creates SRT file from audio. If shorts_cadence is True, applies 1-3 word cadence grouping."""
         try:
             if shorts_cadence:
                 words = self.transcribe_with_words(audio_file, model_size="base")
-                cues = group_words_into_shorts_cues(words)
+                cues = group_words_into_shorts_cues(words, target_words_max=max_words_per_cue)
                 srt_content = cues_to_srt(cues)
             else:
                 from faster_whisper import WhisperModel

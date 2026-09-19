@@ -358,6 +358,32 @@ class YouTubeClient:
                     resp = await client.post(url, headers=headers, content=content)
                 return resp.status_code in (200, 201)
 
+    async def get_video_statistics(self, video_id: str) -> Dict[str, Any]:
+        """Fetch real statistics for a video via YouTube Data API v3."""
+        url = "https://www.googleapis.com/youtube/v3/videos"
+        params = {
+            "part": "statistics,snippet",
+            "id": video_id
+        }
+        resp = await self._request_with_auto_refresh("GET", url, params=params, timeout=30.0)
+        if resp.status_code != 200:
+            raise self._parse_error(resp)
+        data = resp.json()
+        items = data.get("items", [])
+        if not items:
+            return {}
+        item = items[0]
+        stats = item.get("statistics", {})
+        snippet = item.get("snippet", {})
+        return {
+            "youtube_video_id": video_id,
+            "title": snippet.get("title", ""),
+            "views": int(stats.get("viewCount", 0)),
+            "likes": int(stats.get("likeCount", 0)),
+            "comments": int(stats.get("commentCount", 0)),
+            "published_at": snippet.get("publishedAt", "")
+        }
+
 
     async def get_channel_reports(
         self,

@@ -24,6 +24,8 @@ from backend.app.api.publishing import router as publishing_router
 from backend.app.api.analytics import router as analytics_router
 from backend.app.api.jobs import router as jobs_router
 from backend.app.api.autopilot import router as autopilot_router
+from backend.app.api.caption_styles import router as caption_styles_router
+
 
 settings = get_settings()
 
@@ -305,6 +307,7 @@ app.include_router(publishing_router)
 app.include_router(analytics_router)
 app.include_router(jobs_router)
 app.include_router(autopilot_router)
+app.include_router(caption_styles_router)
 
 # Mount local media directory for direct asset access
 os.makedirs(settings.MEDIA_ROOT, exist_ok=True)

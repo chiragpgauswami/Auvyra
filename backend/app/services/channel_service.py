@@ -10,6 +10,7 @@ from backend.app.repositories.channels import (
     NicheCacheRepository
 )
 from backend.app.repositories.brain import ChannelBrainRepository
+from backend.app.repositories.caption_styles import CaptionStyleRepository
 from backend.app.models.channel import AutopilotConfig, AutopilotMode, ContentFormat
 from backend.app.ai.gateway import AIGateway
 from backend.app.config import get_settings
@@ -23,7 +24,9 @@ class ChannelService:
         self.brain_repo = ChannelBrainRepository(db)
         self.queue_repo = AutopilotQueueRepository(db)
         self.niche_cache_repo = NicheCacheRepository(db)
+        self.caption_repo = CaptionStyleRepository(db)
         self.ai_gateway = ai_gateway or AIGateway(get_settings())
+
     
     async def create_channel(self, user_id: str, data: dict) -> dict:
         data["user_id"] = user_id
@@ -244,6 +247,14 @@ class ChannelService:
             local_tz = zoneinfo.ZoneInfo(config.schedule.timezone)
             now_local = datetime.now(local_tz)
 
+            # Resolve active caption style for snapshotting
+            style_id = getattr(config, "caption_style", "bold") or "bold"
+            preset = self.caption_repo.get_preset(style_id)
+            if preset:
+                active_style_cfg = await self.caption_repo.save_channel_style(channel_id, user_id, preset["config"])
+            else:
+                active_style_cfg = await self.caption_repo.get_channel_style(channel_id, user_id)
+
             candidate_slots = []
             for day_offset in range(1, 8):
                 cand_date = now_local.date() + timedelta(days=day_offset)
@@ -273,6 +284,7 @@ class ChannelService:
                         "format": config.format.value,
                         "pillar": pillar,
                         "topic": topic_premise,
+                        "caption_style_config": active_style_cfg,
                         "status": "pending",
                         "priority": 1,
                         "source": "autopilot_bootstrap",
@@ -283,6 +295,7 @@ class ChannelService:
                     }
                     await self.queue_repo.create_slot(slot_doc)
                     created_count += 1
+
 
         # Invalidate niche recommendations cache on reconfiguration
         await self.niche_cache_repo.invalidate(channel_id)

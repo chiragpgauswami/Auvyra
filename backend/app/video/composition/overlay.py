@@ -135,10 +135,45 @@ class VideoOverlay:
                         target_width = int(v_w * 0.86)
                         safe_zone_max_h = int((0.76 - 0.62) * v_h)  # max allowable height for safe zone
 
-                        base_font_size = int(params.font_size or 54)
-                        text_color = params.text_color or "#FFFFFF"
-                        stroke_color = params.stroke_color or "#000000"
-                        stroke_width = int(params.stroke_width or 2)
+                        # Extract caption style configuration if present
+                        caption_cfg = getattr(params, "caption_style", None) or {}
+                        if isinstance(caption_cfg, dict) and caption_cfg:
+                            pref_font = caption_cfg.get("font_family")
+                            if pref_font:
+                                font_resolved = resolve_platform_font(pref_font) or font_resolved
+
+                            base_font_size = int(caption_cfg.get("font_size", params.font_size or 54))
+                            text_color = caption_cfg.get("text_color", params.text_color or "#FFFFFF")
+                            stroke_color = caption_cfg.get("stroke_color", params.stroke_color or "#000000")
+                            stroke_width = int(round(float(caption_cfg.get("outline_width", params.stroke_width or 2))))
+
+                            bg_type = caption_cfg.get("background_type", "pill")
+                            bg_opacity = float(caption_cfg.get("background_opacity", 0.82))
+                            if bg_type == "none":
+                                bg_color = None
+                                clip_margin = None
+                            elif bg_type == "box":
+                                bg_color = (15, 23, 42, int(round(255 * bg_opacity)))
+                                clip_margin = (14, 8)
+                            else:  # pill default
+                                bg_color = (15, 23, 42, int(round(255 * bg_opacity)))
+                                clip_margin = (22, 12)
+
+                            pos_mode = caption_cfg.get("position", "safe_center")
+                            if pos_mode == "lower_third":
+                                target_ratio = 0.74
+                            elif pos_mode == "upper_third":
+                                target_ratio = 0.65
+                            else:
+                                target_ratio = 0.70
+                        else:
+                            base_font_size = int(params.font_size or 54)
+                            text_color = params.text_color or "#FFFFFF"
+                            stroke_color = params.stroke_color or "#000000"
+                            stroke_width = int(params.stroke_width or 2)
+                            bg_color = (15, 23, 42, 210)
+                            clip_margin = (22, 12)
+                            target_ratio = 0.70
 
                         for idx, (start_sec, end_sec), text in srt_entries:
                             duration = max(0.12, end_sec - start_sec)
@@ -155,18 +190,22 @@ class VideoOverlay:
 
                             for attempt in range(4):
                                 try:
-                                    txt_clip = TextClip(
-                                        text=cue_text,
-                                        font=font_resolved,
-                                        font_size=current_font_size,
-                                        color=text_color,
-                                        stroke_color=stroke_color,
-                                        stroke_width=stroke_width,
-                                        bg_color=(15, 23, 42, 210),  # High-contrast dark translucent pill
-                                        margin=(22, 12),
-                                        size=(target_width, None),
-                                        text_align="center"
-                                    )
+                                    txt_clip_kwargs = {
+                                        "text": cue_text,
+                                        "font": font_resolved,
+                                        "font_size": current_font_size,
+                                        "color": text_color,
+                                        "stroke_color": stroke_color,
+                                        "stroke_width": stroke_width,
+                                        "size": (target_width, None),
+                                        "text_align": "center"
+                                    }
+                                    if bg_color:
+                                        txt_clip_kwargs["bg_color"] = bg_color
+                                    if clip_margin:
+                                        txt_clip_kwargs["margin"] = clip_margin
+
+                                    txt_clip = TextClip(**txt_clip_kwargs)
                                     clip_h = int(txt_clip.size[1])
                                     if clip_h <= safe_zone_max_h or current_font_size <= 32:
                                         break
@@ -182,7 +221,7 @@ class VideoOverlay:
                                     video_height=v_h,
                                     safe_min_ratio=0.62,
                                     safe_max_ratio=0.76,
-                                    target_ratio=0.70
+                                    target_ratio=target_ratio
                                 )
 
                                 final_txt_clip = (
@@ -193,6 +232,7 @@ class VideoOverlay:
                                     .with_position(("center", y_pos))
                                 )
                                 sub_clips.append(final_txt_clip)
+
 
                     if sub_clips:
                         composite = CompositeVideoClip([video, *sub_clips], size=video.size).with_duration(video.duration)

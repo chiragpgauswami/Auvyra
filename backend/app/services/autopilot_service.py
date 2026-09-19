@@ -31,6 +31,10 @@ from backend.app.repositories.autopilot_events import AutopilotEventsRepository
 from backend.app.repositories.videos import VideoRepository, VideoAssetRepository
 from backend.app.repositories.jobs import NotificationRepository
 from backend.app.repositories.users import OAuthAccountRepository
+from backend.app.repositories.caption_styles import CaptionStyleRepository
+from backend.app.repositories.content_topics import ContentTopicRepository
+from backend.app.repositories.video_analytics import VideoAnalyticsRepository
+
 from backend.app.services.research_service import ResearchService
 from backend.app.services.content_service import ContentService
 from backend.app.services.metadata_service import MetadataService
@@ -97,6 +101,10 @@ class AutopilotService:
         self.asset_repo = VideoAssetRepository(db)
         self.notification_repo = NotificationRepository(db)
         self.oauth_repo = OAuthAccountRepository(db)
+        self.caption_repo = CaptionStyleRepository(db)
+        self.topic_repo = ContentTopicRepository(db)
+        self.video_analytics_repo = VideoAnalyticsRepository(db)
+
 
         self.research_service = ResearchService(db, self.ai)
         self.content_service = ContentService(db, self.ai)
@@ -446,13 +454,19 @@ class AutopilotService:
         channel_id = slot["channel_id"]
         user_id = slot["user_id"]
 
+        retryable = getattr(error, "retryable", False)
+        attempts = int(slot.get("attempts", 0)) + 1
+        now_str = datetime.now(timezone.utc).isoformat()
         error_dict = {
             "code": getattr(error, "code", "STAGE_EXECUTION_FAILED"),
-            "message": str(error),
             "stage": stage,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "message": str(error),
+            "retryable": retryable,
+            "attempts": attempts,
+            "occurred_at": now_str,
+            "timestamp": now_str
         }
-        retryable = getattr(error, "retryable", False)
+
 
         # Update stage checkpoint to failed
         await self.queue_repo.checkpoint_stage(
@@ -517,23 +531,45 @@ class AutopilotService:
 
     async def _stage_research(self, slot: dict, channel: dict, brain: dict) -> dict:
         topic = slot.get("topic")
-        pillar = slot.get("pillar")
+        pillar = slot.get("pillar") or "General"
         user_id = slot["user_id"]
         channel_id = slot["channel_id"]
 
-        if not topic or topic == "Automated Production Slot":
+        recent_topics = await self.topic_repo.get_recent_topics(channel_id, days=30)
+        rationale = "Scheduled queue topic selection."
+        hook_premise = ""
+
+        if not topic or topic == "Automated Production Slot" or topic.lower() in recent_topics:
             opportunities = await self.research_service.generate_channel_opportunities(user_id, channel_id)
             if opportunities:
-                top_opp = max(opportunities, key=lambda x: x.get("opportunity_score", 0))
+                fresh_opps = [o for o in opportunities if o.get("topic", "").lower().strip() not in recent_topics]
+                target_opps = fresh_opps if fresh_opps else opportunities
+                top_opp = max(target_opps, key=lambda x: x.get("opportunity_score", 0))
                 topic = top_opp.get("topic", f"Breakthrough in {pillar}")
+                rationale = top_opp.get("market_need") or f"Opportunity score {top_opp.get('opportunity_score', 85)} in {pillar}"
+                hook_premise = top_opp.get("hook_premise", "")
             else:
                 topic = f"Breakthroughs in {pillar}"
+                rationale = f"Pillar focus for {pillar}"
+
+        # Record decision into content_topics
+        await self.topic_repo.record_topic_decision(
+            channel_id=channel_id,
+            user_id=user_id,
+            topic=topic,
+            hook=hook_premise,
+            pillar=pillar,
+            rationale=rationale,
+            source="autopilot_research"
+        )
 
         return {
             "topic": topic,
             "pillar": pillar,
-            "niche": brain.get("niche", "Technology")
+            "niche": brain.get("niche", "Technology"),
+            "rationale": rationale
         }
+
 
     async def _stage_script(self, slot: dict, channel: dict, brain: dict, artifacts: dict) -> dict:
         if artifacts.get("script_text"):
@@ -769,8 +805,8 @@ class AutopilotService:
 
     async def _stage_subtitles(self, slot: dict, channel: dict, artifacts: dict) -> dict:
         """
-        Real Whisper Subtitle Generation (Requirement 4 & Phase 21 Hardened Rules).
-        Uses faster-whisper on actual generated TTS audio with 1-3 word cadence.
+        Real Whisper Subtitle Generation (Requirement 4 & Phase 21/22 Rules).
+        Uses faster-whisper on actual generated TTS audio with style cadence.
         """
         if artifacts.get("subtitle_path") and os.path.exists(artifacts["subtitle_path"]):
             return {"subtitle_path": artifacts["subtitle_path"]}
@@ -781,12 +817,26 @@ class AutopilotService:
 
         channel_id = slot["channel_id"]
         slot_id = str(slot["_id"])
+        user_id = slot["user_id"]
         out_dir = os.path.abspath(f"media/videos/{channel_id}")
         srt_path = os.path.join(out_dir, f"subs_{slot_id}.srt")
 
+        # Resolve caption style snapshot or channel default
+        caption_cfg = slot.get("caption_style_config")
+        if not caption_cfg:
+            caption_cfg = await self.caption_repo.get_channel_style(channel_id, user_id)
+
+        max_words = int(caption_cfg.get("max_words_per_cue", 3))
+
         try:
-            # Transcribe real TTS audio using faster-whisper with 1-3 word cadence
-            self.sub_gen.create_from_audio(audio_path, srt_path, word_level=True, shorts_cadence=True)
+            # Transcribe real TTS audio using faster-whisper with style cadence
+            self.sub_gen.create_from_audio(
+                audio_path,
+                srt_path,
+                word_level=True,
+                shorts_cadence=True,
+                max_words_per_cue=max_words
+            )
 
             if not os.path.exists(srt_path) or os.path.getsize(srt_path) < 10:
                 raise WhisperSubtitleError("Whisper failed to produce valid subtitle file")
@@ -810,10 +860,16 @@ class AutopilotService:
 
         channel_id = slot["channel_id"]
         slot_id = str(slot["_id"])
+        user_id = slot["user_id"]
         out_dir = os.path.abspath(f"media/videos/{channel_id}")
         os.makedirs(out_dir, exist_ok=True)
         raw_composed_path = os.path.join(out_dir, f"composed_{slot_id}.mp4")
         final_video_path = os.path.join(out_dir, f"video_{slot_id}.mp4")
+
+        # Resolve caption style snapshot or channel default
+        caption_cfg = slot.get("caption_style_config")
+        if not caption_cfg:
+            caption_cfg = await self.caption_repo.get_channel_style(channel_id, user_id)
 
         try:
             # 1. Assemble clips to match audio duration and calculate interval union stock coverage
@@ -833,7 +889,8 @@ class AutopilotService:
                 topic=slot.get("topic", "AI Daily"),
                 aspect_ratio="9:16",
                 subtitle_enabled=True,
-                bgm_type="none"
+                bgm_type="none",
+                caption_style=caption_cfg
             )
             success = self.overlay.compose_final(
                 video_path=raw_composed_path,
@@ -844,6 +901,7 @@ class AutopilotService:
             )
             if not success or not os.path.exists(final_video_path):
                 raise RenderError("FFmpeg overlay composition failed to produce output MP4")
+
 
             return {
                 "video_path": final_video_path,
@@ -1105,3 +1163,98 @@ class AutopilotService:
 
         await self.db.autopilot_queue.update_one({"_id": oid}, {"$set": update_doc})
         return await self.execute_queue_item(queue_item_id, worker_id)
+
+    async def cancel_queue_item(self, user_id: str, queue_item_id: str) -> bool:
+        """Cancels a pending or failed queue slot."""
+        oid = ObjectId(queue_item_id) if ObjectId.is_valid(queue_item_id) else queue_item_id
+        res = await self.db.autopilot_queue.delete_one({
+            "_id": oid,
+            "user_id": user_id,
+            "status": {"$in": ["pending", "ready_for_approval", "failed", "retrying"]}
+        })
+        return res.deleted_count > 0
+
+    async def get_channel_observability(self, user_id: str, channel_id: str) -> Dict[str, Any]:
+        """Provides complete operational observability into the autonomous engine for a channel."""
+        channel = await self.channel_repo.find_by_id(channel_id, user_id=user_id)
+        if not channel:
+            raise ValueError(f"Channel {channel_id} not found or access denied")
+
+        now_utc = datetime.now(timezone.utc)
+
+        # Queue depth counts
+        counts = {}
+        for st in ["pending", "in_production", "ready_for_approval", "published", "failed", "retrying"]:
+            counts[st] = await self.db.autopilot_queue.count_documents({"channel_id": channel_id, "status": st})
+
+        # Active worker leases
+        active_leases_cursor = self.db.autopilot_queue.find({
+            "channel_id": channel_id,
+            "status": "in_production",
+            "lease_expires_at": {"$gt": now_utc}
+        })
+        active_leases = await active_leases_cursor.to_list(length=10)
+
+        # Last successful upload
+        last_pub_slot = await self.db.autopilot_queue.find_one(
+            {"channel_id": channel_id, "status": "published"},
+            sort=[("published_at", -1)]
+        )
+
+        # Last learning run
+        last_learn_run = await self.db.learning_runs.find_one(
+            {"channel_id": channel_id},
+            sort=[("completed_at", -1)]
+        )
+
+        # Recent events (last 15)
+        events = await self.events_repo.find_by_channel(channel_id, user_id, limit=15)
+
+        # Failure telemetry
+        failed_slots_cursor = self.db.autopilot_queue.find(
+            {"channel_id": channel_id, "status": {"$in": ["failed", "retrying"]}}
+        ).sort("updated_at", -1).limit(5)
+        recent_failures = await failed_slots_cursor.to_list(length=5)
+
+        # Active caption style
+        channel_style = await self.caption_repo.get_channel_style(channel_id, user_id)
+
+        return {
+            "channel_id": channel_id,
+            "channel_name": channel.get("name"),
+            "autopilot_enabled": channel.get("autopilot_enabled", False),
+            "mode": channel.get("autopilot_config", {}).get("mode", "assisted"),
+            "channel_style": channel_style,
+            "queue_depth": counts,
+            "active_worker_leases": [
+                {
+                    "slot_id": str(s["_id"]),
+                    "stage": s.get("current_stage"),
+                    "worker_id": s.get("claimed_by"),
+                    "lease_expires_at": s.get("lease_expires_at").isoformat() if s.get("lease_expires_at") else None
+                }
+                for s in active_leases
+            ],
+            "last_successful_upload": {
+                "published_at": last_pub_slot.get("published_at").isoformat() if (last_pub_slot and last_pub_slot.get("published_at")) else None,
+                "video_id": last_pub_slot.get("video_id") if last_pub_slot else None,
+                "youtube_url": last_pub_slot.get("youtube_url") if last_pub_slot else None
+            } if last_pub_slot else None,
+            "last_learning_run": {
+                "completed_at": last_learn_run.get("completed_at").isoformat() if (last_learn_run and last_learn_run.get("completed_at")) else None,
+                "status": last_learn_run.get("status") if last_learn_run else None,
+                "signals_count": last_learn_run.get("signals_count", 0) if last_learn_run else 0
+            } if last_learn_run else None,
+            "recent_events": events,
+            "recent_failures": [
+                {
+                    "slot_id": str(f["_id"]),
+                    "topic": f.get("topic"),
+                    "current_stage": f.get("current_stage"),
+                    "attempts": f.get("attempts", 0),
+                    "last_error": f.get("last_error")
+                }
+                for f in recent_failures
+            ]
+        }
+

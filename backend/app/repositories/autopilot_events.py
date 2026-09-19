@@ -65,3 +65,5 @@ class AutopilotEventsRepository(BaseRepository):
         ).sort("timestamp", 1)
         return await cursor.to_list(length=200)
 
+    get_channel_events = find_by_channel
+

@@ -63,3 +63,41 @@ async def generate_insights(
     service: AnalyticsService = Depends(get_analytics_service)
 ):
     return await service.generate_insights(str(user["_id"]), channel_id)
+
+@router.get("/channels/{channel_id}/summary")
+async def get_channel_summary(
+    channel_id: str,
+    user: dict = Depends(require_auth),
+    service: AnalyticsService = Depends(get_analytics_service)
+):
+    """Returns aggregated video analytics summary for a channel."""
+    try:
+        return await service.get_channel_summary(str(user["_id"]), channel_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_NOT_FOUND", "message": str(e)})
+
+@router.post("/channels/{channel_id}/videos/{video_id}/sync")
+async def sync_video_analytics(
+    channel_id: str,
+    video_id: str,
+    user: dict = Depends(require_auth),
+    service: AnalyticsService = Depends(get_analytics_service)
+):
+    """Syncs live YouTube statistics for a single video into historical snapshots."""
+    try:
+        return await service.sync_video_analytics(str(user["_id"]), channel_id, video_id)
+    except YouTubeAPIError as e:
+        raise HTTPException(status_code=e.status_code, detail={"code": e.error_code, "message": e.message})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail={"code": "BAD_REQUEST", "message": str(e)})
+
+@router.get("/channels/{channel_id}/videos/{video_id}/history")
+async def get_video_analytics_history(
+    channel_id: str,
+    video_id: str,
+    user: dict = Depends(require_auth),
+    service: AnalyticsService = Depends(get_analytics_service)
+):
+    """Retrieves immutable historical timeline of analytics snapshots for a video."""
+    return await service.get_video_analytics_history(str(user["_id"]), channel_id, video_id)
+

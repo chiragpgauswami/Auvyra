@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   CheckCircle2,
+  ExternalLink,
   Plus,
   RefreshCw,
   Sliders,
@@ -10,6 +11,7 @@ import {
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import toast from "react-hot-toast";
+import { Link } from "react-router-dom";
 import { toggleAutopilot, triggerAutopilot } from "../api/autopilot";
 import {
   createChannel,
@@ -315,9 +317,13 @@ const Channels = () => {
                     </div>
                   )}
                   <div>
-                    <h3 className="text-lg font-semibold text-white leading-tight">
+                    <Link
+                      to={`/channels/${channel.id}`}
+                      className="text-lg font-semibold text-white leading-tight hover:text-blue-400 transition-colors inline-flex items-center gap-1.5 group"
+                    >
                       {channel.name}
-                    </h3>
+                      <ExternalLink className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </Link>
                     {channel.handle && (
                       <p className="text-xs text-slate-400">{channel.handle}</p>
                     )}
@@ -406,27 +412,33 @@ const Channels = () => {
                   </span>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="grid grid-cols-3 gap-2">
+                  <Link
+                    to={`/channels/${channel.id}`}
+                    className="btn-secondary text-xs py-2 flex items-center justify-center gap-1 border-slate-700 hover:border-slate-500 text-slate-300"
+                  >
+                    Control Center
+                  </Link>
                   <button
                     type="button"
                     onClick={() => setWizardChannel(channel)}
-                    className="flex-1 btn-secondary text-xs py-2 flex items-center justify-center gap-1.5 border-blue-800/60 text-blue-300 hover:bg-blue-950/40"
+                    className="btn-secondary text-xs py-2 flex items-center justify-center gap-1 border-blue-800/60 text-blue-300 hover:bg-blue-950/40"
                   >
                     <Sliders className="w-3.5 h-3.5 text-blue-400" />
-                    Autopilot Wizard
+                    Wizard
                   </button>
                   <button
                     type="button"
                     onClick={() => handleRunAutopilot(channel)}
                     disabled={runningAutopilotId === channel.id}
-                    className="flex-1 btn-primary text-xs py-2 flex items-center justify-center gap-1.5"
+                    className="btn-primary text-xs py-2 flex items-center justify-center gap-1"
                   >
                     <Zap
                       className={`w-3.5 h-3.5 ${runningAutopilotId === channel.id ? "animate-spin" : "text-amber-400"}`}
                     />
                     {runningAutopilotId === channel.id
-                      ? "Running Cycle..."
-                      : "Run Autopilot Cycle"}
+                      ? "Running..."
+                      : "Run Cycle"}
                   </button>
                 </div>
               </div>

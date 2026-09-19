@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from enum import Enum
-from typing import Callable, Any, Optional
+from typing import Callable, Any, Optional, Dict
 
 class VideoAspect(str, Enum):
     landscape = "16:9"
@@ -65,6 +65,7 @@ class VideoGenerationRequest(BaseModel):
     max_clip_duration: int = 5
     video_count: int = 1
     output_dir: str = ""
+    caption_style: Optional[Dict[str, Any]] = None
 
 class VideoGenerationResult(BaseModel):
     video_path: str

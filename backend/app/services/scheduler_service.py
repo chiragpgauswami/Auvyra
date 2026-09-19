@@ -12,6 +12,7 @@ from loguru import logger
 
 from backend.app.repositories.channels import ChannelRepository, AutopilotQueueRepository
 from backend.app.repositories.jobs import JobRepository
+from backend.app.repositories.caption_styles import CaptionStyleRepository
 from backend.app.models.channel import AutopilotMode
 from backend.app.models.job import JobType
 
@@ -21,6 +22,8 @@ class SchedulerService:
         self.channel_repo = ChannelRepository(db)
         self.queue_repo = AutopilotQueueRepository(db)
         self.job_repo = JobRepository(db)
+        self.caption_repo = CaptionStyleRepository(db)
+
 
     async def tick(self, now_utc: Optional[datetime] = None, max_global: int = 2) -> Dict[str, Any]:
         """
@@ -105,6 +108,8 @@ class SchedulerService:
 
                 candidate_slots.sort()
 
+                caption_cfg = await self.caption_repo.get_channel_style(channel_id, user_id)
+
                 created_for_chan = 0
                 for cand_dt in candidate_slots:
                     if created_for_chan >= needed:
@@ -124,6 +129,7 @@ class SchedulerService:
                             "format": config.get("format", "shorts"),
                             "pillar": pillar_choice,
                             "topic": f"Breakthroughs in {pillar_choice}",
+                            "caption_style_config": caption_cfg,
                             "status": "pending",
                             "priority": 1,
                             "source": "scheduler_replenish",
@@ -138,6 +144,7 @@ class SchedulerService:
                         await self.queue_repo.create_slot(slot_doc)
                         created_for_chan += 1
                         total_replenished += 1
+
 
         return total_replenished
 

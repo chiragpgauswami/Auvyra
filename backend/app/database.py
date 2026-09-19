@@ -81,6 +81,21 @@ class MongoDBManager:
 
             # niche_recommendations_cache: channel_id
             await self.db.niche_recommendations_cache.create_index([("channel_id", pymongo.ASCENDING)], unique=True)
+
+            # Phase 22: caption_style_configs (unique per channel_id)
+            await self.db.caption_style_configs.create_index([("channel_id", pymongo.ASCENDING)], unique=True)
+            await self.db.caption_style_configs.create_index([("user_id", pymongo.ASCENDING)])
+
+            # Phase 22: video_analytics_snapshots
+            await self.db.video_analytics_snapshots.create_index([("channel_id", pymongo.ASCENDING), ("video_id", pymongo.ASCENDING), ("collected_at", pymongo.DESCENDING)])
+            await self.db.video_analytics_snapshots.create_index([("channel_id", pymongo.ASCENDING), ("collected_at", pymongo.DESCENDING)])
+
+            # Phase 22: content_topics (freshness and deduplication)
+            await self.db.content_topics.create_index([("channel_id", pymongo.ASCENDING), ("selected_at", pymongo.DESCENDING)])
+            await self.db.content_topics.create_index([("channel_id", pymongo.ASCENDING), ("topic", pymongo.ASCENDING)])
+
+            # Phase 22: learning_runs
+            await self.db.learning_runs.create_index([("channel_id", pymongo.ASCENDING), ("started_at", pymongo.DESCENDING)])
             
         except Exception as e:
             logger.error(f"Error creating indexes: {e}")

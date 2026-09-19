@@ -6,6 +6,7 @@ import Layout from "./components/Layout";
 
 import Analytics from "./pages/Analytics";
 import Brain from "./pages/Brain";
+import ChannelControlCenter from "./pages/ChannelControlCenter";
 import Channels from "./pages/Channels";
 import Create from "./pages/Create";
 import Dashboard from "./pages/Dashboard";
@@ -43,6 +44,10 @@ function App() {
         >
           <Route path="/" element={<Dashboard />} />
           <Route path="/channels" element={<Channels />} />
+          <Route
+            path="/channels/:channelId"
+            element={<ChannelControlCenter />}
+          />
           <Route path="/brain" element={<Brain />} />
           <Route path="/research" element={<Research />} />
           <Route path="/create" element={<Create />} />

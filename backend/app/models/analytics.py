@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timezone
 
 class AnalyticsSnapshot(BaseModel):
     id: str = Field(alias="_id")
@@ -30,3 +30,16 @@ class StrategyInsight(BaseModel):
     supporting_metrics: dict = {}
     actionable: bool = True
     created_at: datetime
+
+class VideoAnalyticsSnapshot(BaseModel):
+    id: str = Field(alias="_id")
+    user_id: str
+    channel_id: str
+    video_id: str
+    youtube_video_id: str | None = None
+    collected_at: datetime
+    metrics: dict = Field(default_factory=dict)
+    source: str = "youtube_analytics_v2"
+    api_version: str = "v2"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+

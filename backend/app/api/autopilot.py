@@ -75,6 +75,24 @@ async def get_autopilot_status(
         "upcoming_slots_count": len(upcoming_slots)
     }
 
+@router.get("/{channel_id}/observability")
+async def get_autopilot_observability(
+    channel_id: str,
+    user: dict = Depends(require_auth),
+    service: AutopilotService = Depends(get_autopilot_service)
+):
+    """Provides comprehensive operational view for Channel Control Center."""
+    try:
+        return await service.get_channel_observability(
+            user_id=str(user["_id"]),
+            channel_id=channel_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_NOT_FOUND", "message": str(e)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"code": "OBSERVABILITY_ERROR", "message": str(e)})
+
+
 @router.get("/{channel_id}/events")
 async def get_channel_events(
     channel_id: str,

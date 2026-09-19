@@ -15,6 +15,7 @@ class LearningService:
     """Consumes analytics snapshots, analyzes performance trends, updates channel memory and ChannelBrain."""
     
     def __init__(self, db, ai_gateway: Optional[AIGateway] = None):
+        self.db = db
         self.channel_repo = ChannelRepository(db)
         self.memory_repo = ChannelMemoryRepository(db)
         self.brain_repo = ChannelBrainRepository(db)
@@ -99,6 +100,7 @@ class LearningService:
 
     async def run_learning_cycle(self, user_id: str, channel_id: str) -> dict:
         """Executes full closed-loop feedback: updates channel memory and persists winning hooks/rules into ChannelBrain."""
+        start_time = datetime.now(timezone.utc)
         # 1. Update general channel memory
         memory = await self.update_channel_memory(user_id, channel_id)
 
@@ -124,9 +126,25 @@ class LearningService:
 
         scored_videos.sort(key=lambda x: x[0], reverse=True)
 
+        structured_signals: List[Dict[str, Any]] = []
+        now_utc = datetime.now(timezone.utc)
+
         if scored_videos:
             top_threshold = max(len(scored_videos) // 4, 1)
             top_performers = [v for s, v in scored_videos[:top_threshold] if s > 0]
+            weak_performers = [v for s, v in scored_videos[top_threshold:] if s >= 0]
+
+            # Signal 1: Top Performing Topics
+            if top_performers:
+                top_vids = [str(v.get("_id")) for v in top_performers]
+                structured_signals.append({
+                    "signal": "top_performing_topics",
+                    "value": [v.get("title", "") for v in top_performers[:3]],
+                    "confidence": 0.88,
+                    "evidence_video_ids": top_vids,
+                    "sample_size": len(top_performers),
+                    "updated_at": now_utc.isoformat()
+                })
 
             for v in top_performers:
                 v_title = v.get("title", "")
@@ -144,6 +162,27 @@ class LearningService:
                             added = await self.brain_repo.add_winning_hook(channel_id, user_id, hook)
                             if added:
                                 winning_hooks_added += 1
+                                structured_signals.append({
+                                    "signal": "winning_hook",
+                                    "value": hook,
+                                    "confidence": 0.82,
+                                    "evidence_video_ids": [str(v.get("_id"))],
+                                    "sample_size": 1,
+                                    "updated_at": now_utc.isoformat()
+                                })
+
+            # Signal 2: Preferred Video Duration
+            durations = [v.get("duration") for v in top_performers if v.get("duration")]
+            if durations:
+                avg_dur = round(sum(durations) / len(durations), 1)
+                structured_signals.append({
+                    "signal": "preferred_video_duration",
+                    "value": f"{avg_dur}s",
+                    "confidence": 0.85,
+                    "evidence_video_ids": [str(v.get("_id")) for v in top_performers[:5]],
+                    "sample_size": len(durations),
+                    "updated_at": now_utc.isoformat()
+                })
 
             # Synthesize learned rule
             if len(top_performers) >= 1:
@@ -151,6 +190,32 @@ class LearningService:
                 added_rule = await self.brain_repo.add_learned_rule(channel_id, user_id, rule_text)
                 if added_rule:
                     rules_added += 1
+                    structured_signals.append({
+                        "signal": "retention_pacing_rule",
+                        "value": rule_text,
+                        "confidence": 0.90,
+                        "evidence_video_ids": [str(top_performers[0].get("_id"))],
+                        "sample_size": len(scored_videos),
+                        "updated_at": now_utc.isoformat()
+                    })
+
+        # Persist structured signals to ChannelBrain
+        if structured_signals:
+            await self.brain_repo.update_structured_signals(channel_id, user_id, structured_signals)
+
+        # Record learning run in learning_runs collection
+        learning_run_doc = {
+            "channel_id": channel_id,
+            "user_id": user_id,
+            "started_at": start_time,
+            "completed_at": now_utc,
+            "videos_evaluated": len(scored_videos),
+            "winning_hooks_added": winning_hooks_added,
+            "rules_learned": rules_added,
+            "signals_count": len(structured_signals),
+            "status": "completed"
+        }
+        await self.db.learning_runs.insert_one(learning_run_doc)
 
         # Fetch updated brain
         updated_brain = await self.brain_repo.find_by_channel(channel_id, user_id)
@@ -160,9 +225,11 @@ class LearningService:
             "channel_id": channel_id,
             "winning_hooks_added": winning_hooks_added,
             "rules_learned": rules_added,
+            "structured_signals_count": len(structured_signals),
             "brain_version": updated_brain.get("strategy_version", 1) if updated_brain else 1,
             "brain": serialize_doc(updated_brain) if updated_brain else {}
         }
+
         
     async def get_channel_memory(self, user_id: str, channel_id: str) -> Optional[dict]:
         channel = await self.channel_repo.find_by_id(channel_id, user_id=user_id)

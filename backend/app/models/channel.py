@@ -67,6 +67,7 @@ class AutopilotConfig(BaseModel):
     mode: AutopilotMode = AutopilotMode.assisted
     approval_required: bool = True
     privacy_status: str = "private"  # private, unlisted, public
+    caption_style: str = "bold"
     tags: list[str] = Field(default_factory=list)
     config_version: int = 1
     created_at: datetime | None = None
@@ -98,6 +99,7 @@ class AutopilotQueueItem(BaseModel):
     format: str = "shorts"
     pillar: str
     topic: str
+    caption_style_config: dict[str, Any] | None = None
     status: str = "pending"  # pending, in_production, researching, scripting, storyboarding, media, tts, subtitles, rendering, qa, ready_for_approval, publishing, published, retrying, failed
     priority: int = 1
     source: str = "autopilot_bootstrap"
@@ -120,6 +122,7 @@ class AutopilotQueueItem(BaseModel):
     published_at: datetime | None = None
     youtube_url: str | None = None
     artifacts: dict[str, Any] = Field(default_factory=dict)
+
 
 
 class ChannelCreate(BaseModel):

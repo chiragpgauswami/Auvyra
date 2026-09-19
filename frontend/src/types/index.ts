@@ -14,12 +14,36 @@ export interface Channel {
   description: string;
   status: string;
   autopilot_enabled: boolean;
+  approval_required?: boolean;
   autopilot_config?: any;
   youtube_channel_id?: string | null;
   thumbnail_url?: string | null;
   subscriber_count?: number;
   video_count?: number;
   view_count?: number;
+}
+
+export interface AutopilotQueueSlot {
+  id: string;
+  queue_item_id?: string;
+  channel_id: string;
+  slot_date: string;
+  scheduled_time: string;
+  scheduled_at?: string;
+  local_time_display?: string;
+  topic?: string;
+  pillar?: string;
+  stage: string;
+  status: string;
+  video_id?: string | null;
+  youtube_video_id?: string | null;
+  youtube_url?: string | null;
+  error?: string | null;
+  attempts?: number;
+  stage_checkpoints?: Record<string, any>;
+  caption_style_config?: any;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Video {

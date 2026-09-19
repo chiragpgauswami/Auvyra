@@ -58,3 +58,18 @@ class ChannelBrainRepository(BaseRepository):
         )
         return res.modified_count > 0
 
+    async def update_structured_signals(self, channel_id: str, user_id: str, signals: List[Dict[str, Any]]) -> bool:
+        """Stores evidence-backed structured insights into ChannelBrain."""
+        res = await self.collection.update_one(
+            {"channel_id": channel_id, "user_id": user_id},
+            {
+                "$set": {
+                    "structured_signals": signals,
+                    "updated_at": datetime.now(timezone.utc)
+                },
+                "$inc": {"strategy_version": 1}
+            }
+        )
+        return res.modified_count > 0
+
+
