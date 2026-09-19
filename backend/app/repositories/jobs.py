@@ -74,6 +74,13 @@ class JobRepository(BaseRepository):
             query["status"] = status
         return await self.find_many(query, limit=limit)
 
+    async def find_active_by_user(self, user_id: str, limit: int = 10) -> list[dict]:
+        query = {
+            "user_id": user_id,
+            "status": {"$in": ["queued", "processing"]}
+        }
+        return await self.find_many(query, limit=limit, sort=[("created_at", -1)])
+
     async def retry_failed(self, id: str) -> bool:
         res = await self.collection.update_one(
             {"_id": ObjectId(id), "status": "failed", "$expr": {"$lt": ["$attempts", "$max_attempts"]}},

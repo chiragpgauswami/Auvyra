@@ -78,29 +78,15 @@ class VideoGenerationService:
                     aspect_ratio=aspect
                 )
             except Exception as e:
-                logger.warning(f"Pexels storyboard fetch failed: {e}, falling back to general search")
+                logger.error(f"Pexels storyboard fetch failed: {e}")
+                raise RuntimeError(f"PEXELS_NO_SUITABLE_MEDIA: {e}")
 
-        if not media_items:
-            # Fallback to provider search
-            search_terms = []
-            for s in storyboard.scenes:
-                if s.search_queries:
-                    search_terms.append(s.search_queries[0])
-            if not search_terms:
-                search_terms = [word for word in request.topic.split() if len(word) > 3] or ["technology", "modern"]
-                
-            provider = self._resolve_media_provider(request)
-            if hasattr(provider, "search_and_download"):
-                media_items = await provider.search_and_download(
-                    queries=search_terms, 
-                    dest_dir=output_dir,
-                    aspect_ratio=aspect,
-                    target_duration=request.duration
-                )
+        if not media_items and request.video_source == "pexels":
+            raise RuntimeError("PEXELS_NO_SUITABLE_MEDIA: No suitable stock video clips could be retrieved for storyboard scenes")
 
-        if not media_items:
-            # Fallback to local media provider
-            logger.warning("Online stock search returned empty, falling back to LocalMediaProvider")
+        if not media_items and request.video_source == "local":
+            # Local media provider explicitly requested
+            logger.info("Local video source requested, using LocalMediaProvider")
             local_fallback = LocalMediaProvider()
             search_terms = [request.topic]
             media_items = await local_fallback.search_and_download(
@@ -109,9 +95,9 @@ class VideoGenerationService:
                 aspect_ratio=aspect,
                 target_duration=request.duration
             )
-            
+
         if not media_items:
-            raise RuntimeError("Failed to find or generate suitable video media for the timeline")
+            raise RuntimeError("PEXELS_NO_SUITABLE_MEDIA: Failed to find or generate suitable video media for the timeline")
             
         # 4. Generate narration (40%)
         task_manager.report_progress(*task_manager.GENERATING_NARRATION, "Synthesizing voice narration")
@@ -195,5 +181,7 @@ class VideoGenerationService:
             height=info.get("height", target_h),
             size_bytes=info.get("size", os.path.getsize(final_video_path)),
             subtitle_path=subtitle_path,
-            audio_path=audio_path
+            audio_path=audio_path,
+            media_items=media_items,
+            storyboard=storyboard
         )

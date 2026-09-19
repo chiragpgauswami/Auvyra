@@ -1,33 +1,87 @@
 import { Calendar, Clock, Download, PlaySquare, Share2, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { listChannels } from "../api/channels";
 import { listVideos } from "../api/videos";
 import Card from "../components/Card";
 import StatusBadge from "../components/StatusBadge";
-import { Video } from "../types";
+import { Channel, Video } from "../types";
 
 const Videos = () => {
   const [videos, setVideos] = useState<Video[]>([]);
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [selectedChannelId, setSelectedChannelId] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
 
   useEffect(() => {
-    const fetchVideos = async () => {
-      try {
-        const data = await listVideos();
-        setVideos(data);
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchVideos();
+    listChannels().then(setChannels).catch(console.error);
   }, []);
+
+  const fetchVideos = async () => {
+    setLoading(true);
+    try {
+      const filterStatus = statusFilter === "all" ? undefined : statusFilter;
+      const chId = selectedChannelId || undefined;
+      const data = await listVideos(chId, filterStatus);
+      setVideos(data);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchVideos();
+  }, [selectedChannelId, statusFilter]);
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-white">Videos</h1>
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Videos</h1>
+          <p className="text-slate-400 text-sm">
+            All manual and autonomous videos generated for your channels.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          {channels.length > 0 && (
+            <select
+              value={selectedChannelId}
+              onChange={(e) => setSelectedChannelId(e.target.value)}
+              className="bg-slate-900 border border-slate-800 text-sm text-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary-500"
+            >
+              <option value="">All Channels</option>
+              {channels.map((ch) => (
+                <option key={ch.id} value={ch.id}>
+                  {ch.name}
+                </option>
+              ))}
+            </select>
+          )}
+
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="bg-slate-900 border border-slate-800 text-sm text-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary-500"
+          >
+            <option value="all">All Statuses</option>
+            <option value="generated">Ready / Generated</option>
+            <option value="generating">Generating</option>
+            <option value="queued">Queued</option>
+            <option value="published">Published</option>
+            <option value="failed">Failed</option>
+          </select>
+
+          <button
+            onClick={fetchVideos}
+            className="btn-secondary text-xs py-1.5 px-3"
+          >
+            Refresh
+          </button>
+        </div>
       </div>
 
       <Card>
@@ -52,60 +106,70 @@ const Videos = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
-                {videos.map((video) => (
-                  <tr
-                    key={video.id}
-                    className="hover:bg-slate-800/50 transition-colors"
-                  >
-                    <td className="py-4">
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="w-16 h-10 bg-slate-800 rounded flex items-center justify-center cursor-pointer"
-                          onClick={() => setSelectedVideo(video)}
-                        >
-                          {video.thumbnail_path ? (
-                            <img
-                              src={video.thumbnail_path}
-                              alt="thumbnail"
-                              className="w-full h-full object-cover rounded"
-                            />
-                          ) : (
-                            <PlaySquare className="w-5 h-5 text-slate-500" />
-                          )}
+                {videos.map((video) => {
+                  const thumbSrc =
+                    video.thumbnail_url ||
+                    (video.thumbnail_path
+                      ? `/api/videos/${video.id}/thumbnail${localStorage.getItem("access_token") ? `?token=${encodeURIComponent(localStorage.getItem("access_token") || "")}` : ""}`
+                      : null);
+
+                  return (
+                    <tr
+                      key={video.id}
+                      className="hover:bg-slate-800/50 transition-colors"
+                    >
+                      <td className="py-4">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-16 h-10 bg-slate-800 rounded flex items-center justify-center cursor-pointer overflow-hidden border border-slate-700/50"
+                            onClick={() => setSelectedVideo(video)}
+                          >
+                            {thumbSrc ? (
+                              <img
+                                src={thumbSrc}
+                                alt="thumbnail"
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <PlaySquare className="w-5 h-5 text-slate-500" />
+                            )}
+                          </div>
+                          <span
+                            className="font-medium text-white cursor-pointer hover:text-primary-400 transition-colors line-clamp-1 max-w-[280px]"
+                            onClick={() => setSelectedVideo(video)}
+                          >
+                            {video.title}
+                          </span>
                         </div>
-                        <span
-                          className="font-medium text-white cursor-pointer hover:text-primary-400 transition-colors"
+                      </td>
+                      <td className="py-4">
+                        <StatusBadge status={video.status} />
+                      </td>
+                      <td className="py-4 text-sm text-slate-300">
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-4 h-4 text-slate-500" />
+                          {video.duration
+                            ? `${video.duration.toFixed(1)}s`
+                            : "-"}
+                        </div>
+                      </td>
+                      <td className="py-4 text-sm text-slate-300">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-slate-500" />
+                          {new Date(video.created_at).toLocaleDateString()}
+                        </div>
+                      </td>
+                      <td className="py-4 text-right">
+                        <button
                           onClick={() => setSelectedVideo(video)}
+                          className="text-primary-400 hover:text-primary-300 text-sm font-medium"
                         >
-                          {video.title}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-4">
-                      <StatusBadge status={video.status} />
-                    </td>
-                    <td className="py-4 text-sm text-slate-300">
-                      <div className="flex items-center gap-2">
-                        <Clock className="w-4 h-4 text-slate-500" />
-                        {video.duration ? `${video.duration.toFixed(1)}s` : "-"}
-                      </div>
-                    </td>
-                    <td className="py-4 text-sm text-slate-300">
-                      <div className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-slate-500" />
-                        {new Date(video.created_at).toLocaleDateString()}
-                      </div>
-                    </td>
-                    <td className="py-4 text-right">
-                      <button
-                        onClick={() => setSelectedVideo(video)}
-                        className="text-primary-400 hover:text-primary-300 text-sm font-medium"
-                      >
-                        View & Play
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                          View & Play
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

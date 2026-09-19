@@ -34,6 +34,7 @@ async def test_publishing_calendar():
     mock_db = MagicMock()
     service = PublishingService(mock_db)
 
+    service.channel_repo.find_by_user = AsyncMock(return_value=[])
     service.pub_repo.find_many = AsyncMock(return_value=[
         {
             "_id": "job_1",
@@ -44,7 +45,7 @@ async def test_publishing_calendar():
             "platform": "youtube"
         }
     ])
-    service.video_repo.find_many = AsyncMock(return_value=[
+    service.video_repo.find_by_channel = AsyncMock(return_value=[
         {
             "_id": "vid_1",
             "title": "Drop 1",

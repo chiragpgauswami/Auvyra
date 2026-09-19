@@ -64,6 +64,13 @@ async def generate_video(req: VideoGenerateReq, user: dict = Depends(require_aut
 async def list_videos(channel_id: Optional[str] = Query(None), status: Optional[str] = Query(None), user: dict = Depends(require_auth), service: VideoService = Depends(get_video_service)):
     return await service.list_videos(str(user["_id"]), channel_id, status)
 
+@router.get("/latest")
+async def get_latest_video(channel_id: Optional[str] = Query(None), user: dict = Depends(require_auth), service: VideoService = Depends(get_video_service)):
+    video = await service.get_latest_video(str(user["_id"]), channel_id)
+    if not video:
+        return {"video": None}
+    return {"video": video}
+
 @router.get("/{video_id}")
 async def get_video(video_id: str, user: dict = Depends(require_auth), service: VideoService = Depends(get_video_service)):
     video = await service.get_video(str(user["_id"]), video_id)
@@ -247,6 +254,24 @@ async def download_video(
 
     clean_title = "".join(c for c in video.get("title", "video") if c.isalnum() or c in (" ", "_", "-")).strip()
     return FileResponse(file_path, media_type="video/mp4", filename=f"{clean_title or 'video'}.mp4")
+
+@router.get("/{video_id}/thumbnail")
+async def get_video_thumbnail(
+    video_id: str,
+    request: Request,
+    token: Optional[str] = Query(None),
+    service: VideoService = Depends(get_video_service),
+    auth_service: AuthService = Depends(get_auth_service)
+):
+    """Retrieve the generated video thumbnail image."""
+    video, _ = await _resolve_and_authorize_video(video_id, request, token, service, auth_service)
+    thumb_path = video.get("thumbnail_path")
+    if not thumb_path or not os.path.exists(thumb_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "THUMBNAIL_NOT_FOUND", "message": "Thumbnail image not found"}
+        )
+    return FileResponse(thumb_path, media_type="image/jpeg", filename=f"{video_id}.jpg")
 
 @router.delete("/{video_id}")
 async def delete_video(video_id: str, user: dict = Depends(require_auth), service: VideoService = Depends(get_video_service)):

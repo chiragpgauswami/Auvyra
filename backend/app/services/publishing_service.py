@@ -5,6 +5,7 @@ from loguru import logger
 from backend.app.repositories.publishing import PublishingRepository
 from backend.app.repositories.videos import VideoRepository
 from backend.app.repositories.users import OAuthAccountRepository
+from backend.app.repositories.channels import ChannelRepository, AutopilotQueueRepository
 from backend.app.youtube.client import YouTubeClient, YouTubeAPIError, get_youtube_client_for_user, get_youtube_client_for_channel
 from backend.app.config import get_settings
 from backend.app.utils.serializers import serialize_doc, serialize_docs
@@ -15,6 +16,8 @@ class PublishingService:
         self.pub_repo = PublishingRepository(db)
         self.video_repo = VideoRepository(db)
         self.oauth_repo = OAuthAccountRepository(db)
+        self.channel_repo = ChannelRepository(db)
+        self.queue_repo = AutopilotQueueRepository(db)
         self.settings = get_settings()
     
     async def create_publishing_job(
@@ -55,28 +58,107 @@ class PublishingService:
         return serialize_doc(job)
 
     async def get_publishing_calendar(self, user_id: str) -> List[dict]:
-        """Returns consolidated calendar schedule of pending, scheduled, and published content."""
-        jobs = await self.pub_repo.find_many({"user_id": user_id})
-        videos = await self.video_repo.find_many({"user_id": user_id})
+        """Returns consolidated canonical calendar schedule of autopilot queue and manual publishing jobs."""
+        # 1. Fetch user channels
+        user_channels = await self.channel_repo.find_by_user(user_id)
+        channel_map = {str(c["_id"]): c for c in user_channels}
+
+        # 2. Fetch all user videos
+        videos = await self.video_repo.find_by_channel(user_id=user_id, channel_id=None, limit=200)
         video_map = {str(v.get("_id")): v for v in videos}
 
         events = []
+        seen_queue_ids = set()
+
+        # 3. Pull canonical Autopilot Queue slots for all user channels
+        for ch_id, ch in channel_map.items():
+            ch_queue = await self.queue_repo.find_by_channel(ch_id, user_id, limit=100)
+            for item in ch_queue:
+                q_id = str(item.get("_id"))
+                seen_queue_ids.add(q_id)
+                v_id = str(item.get("video_id")) if item.get("video_id") else None
+                vid = video_map.get(v_id, {}) if v_id else {}
+
+                dt = item.get("scheduled_at") or item.get("created_at")
+                raw_status = item.get("status", "pending")
+
+                # Determine display_status
+                if raw_status == "published":
+                    display_status = "Published"
+                elif raw_status == "failed":
+                    display_status = "Failed"
+                elif raw_status == "ready_for_approval":
+                    display_status = "Awaiting Approval"
+                elif raw_status == "in_production":
+                    display_status = "Generating"
+                elif v_id and vid.get("status") in ("generated", "ready"):
+                    display_status = "Scheduled for Upload"
+                else:
+                    display_status = "Scheduled — Video not generated"
+
+                title = vid.get("title") or item.get("topic") or "Scheduled Short"
+                thumb_url = vid.get("thumbnail_url") or vid.get("thumbnail_path")
+                if not thumb_url and v_id and vid.get("thumbnail_path"):
+                    thumb_url = f"/api/videos/{v_id}/thumbnail"
+
+                events.append({
+                    "queue_item_id": q_id,
+                    "job_id": q_id,
+                    "channel_id": ch_id,
+                    "channel_name": ch.get("name", "Connected Channel"),
+                    "video_id": v_id,
+                    "title": title,
+                    "topic": item.get("topic", "Scheduled Video"),
+                    "status": raw_status,
+                    "current_stage": item.get("current_stage"),
+                    "display_status": display_status,
+                    "approval_status": "ready_for_approval" if raw_status == "ready_for_approval" else item.get("approval_status", "pending"),
+                    "publish_status": "published" if raw_status == "published" else "pending",
+                    "scheduled_at": dt.isoformat() if hasattr(dt, "isoformat") else str(dt),
+                    "date": dt.isoformat() if hasattr(dt, "isoformat") else str(dt),
+                    "timezone": item.get("timezone") or ch.get("autopilot_config", {}).get("timezone", "UTC"),
+                    "platform": "youtube",
+                    "thumbnail_url": thumb_url
+                })
+
+        # 4. Pull manual publishing jobs (if not already represented)
+        jobs = await self.pub_repo.find_many({"user_id": user_id})
         for j in jobs:
-            v_id = str(j.get("video_id"))
-            vid = video_map.get(v_id, {})
-            title = j.get("metadata", {}).get("title") or vid.get("title", "Scheduled Video")
+            v_id = str(j.get("video_id")) if j.get("video_id") else None
+            vid = video_map.get(v_id, {}) if v_id else {}
+            title = j.get("metadata", {}).get("title") or vid.get("title", "Manual Upload")
             dt = j.get("scheduled_at") or j.get("created_at")
+            ch_id = str(j.get("channel_id") or vid.get("channel_id") or "")
+            ch = channel_map.get(ch_id, {})
+
+            raw_status = j.get("status", "pending")
+            display_status = "Published" if raw_status == "published" else ("Failed" if raw_status == "failed" else "Scheduled for Upload")
+
+            thumb_url = vid.get("thumbnail_url") or vid.get("thumbnail_path")
+            if not thumb_url and v_id and vid.get("thumbnail_path"):
+                thumb_url = f"/api/videos/{v_id}/thumbnail"
+
             events.append({
+                "queue_item_id": str(j.get("_id")),
                 "job_id": str(j.get("_id")),
+                "channel_id": ch_id,
+                "channel_name": ch.get("name", "Manual Video"),
                 "video_id": v_id,
                 "title": title,
-                "status": j.get("status", "pending"),
+                "topic": title,
+                "status": raw_status,
+                "current_stage": "publishing",
+                "display_status": display_status,
+                "approval_status": "approved",
+                "publish_status": "published" if raw_status == "published" else "pending",
+                "scheduled_at": dt.isoformat() if hasattr(dt, "isoformat") else str(dt),
                 "date": dt.isoformat() if hasattr(dt, "isoformat") else str(dt),
+                "timezone": "UTC",
                 "platform": j.get("platform", "youtube"),
-                "thumbnail_url": vid.get("thumbnail_path") or vid.get("thumbnail_url")
+                "thumbnail_url": thumb_url
             })
 
-        events.sort(key=lambda x: x.get("date", ""), reverse=True)
+        events.sort(key=lambda x: x.get("date", "") or x.get("scheduled_at", ""))
         return events
 
     async def execute_publish(self, user_id: str, job_id: str, is_mock: bool = False) -> dict:

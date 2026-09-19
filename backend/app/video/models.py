@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from enum import Enum
-from typing import Callable, Any, Optional, Dict
+from typing import Callable, Any, Optional, Dict, List
 
 class VideoAspect(str, Enum):
     landscape = "16:9"
@@ -75,3 +75,5 @@ class VideoGenerationResult(BaseModel):
     size_bytes: int
     subtitle_path: str | None = None
     audio_path: str | None = None
+    media_items: Optional[List[Any]] = None
+    storyboard: Optional[Any] = None

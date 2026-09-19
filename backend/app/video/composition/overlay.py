@@ -1,4 +1,5 @@
 import os
+import textwrap
 from typing import Optional, Tuple, List
 from moviepy import VideoFileClip, AudioFileClip, CompositeVideoClip, TextClip
 from loguru import logger
@@ -83,6 +84,12 @@ def compute_safe_zone_position(
 class VideoOverlay:
     """Composes narration, audio, branded header, and dynamic safe-zone Shorts captions."""
 
+    @staticmethod
+    def wrap_caption_text(text: str, font_size: int = 56, target_width: int = 972) -> str:
+        """Dynamically wraps caption cue text to fit within target width at given font size."""
+        chars_per_line = max(14, int(target_width / max(1, (font_size * 0.72))))
+        return textwrap.fill(text.strip().upper(), width=chars_per_line)
+
     def compose_final(
         self,
         video_path: str,
@@ -154,10 +161,10 @@ class VideoOverlay:
                                 clip_margin = None
                             elif bg_type == "box":
                                 bg_color = (15, 23, 42, int(round(255 * bg_opacity)))
-                                clip_margin = (14, 8)
+                                clip_margin = (28, 14)
                             else:  # pill default
                                 bg_color = (15, 23, 42, int(round(255 * bg_opacity)))
-                                clip_margin = (22, 12)
+                                clip_margin = (36, 18)
 
                             pos_mode = caption_cfg.get("position", "safe_center")
                             if pos_mode == "lower_third":
@@ -172,7 +179,7 @@ class VideoOverlay:
                             stroke_color = params.stroke_color or "#000000"
                             stroke_width = int(params.stroke_width or 2)
                             bg_color = (15, 23, 42, 210)
-                            clip_margin = (22, 12)
+                            clip_margin = (36, 18)
                             target_ratio = 0.70
 
                         for idx, (start_sec, end_sec), text in srt_entries:
@@ -184,20 +191,22 @@ class VideoOverlay:
                             if not cue_text:
                                 continue
 
-                            # Dynamic font scaling to guarantee bounding box fits safe zone
+                            # Dynamic font scaling and balanced wrapping to guarantee bounding box fits safe zone snugly
                             current_font_size = base_font_size
                             txt_clip = None
 
                             for attempt in range(4):
                                 try:
+                                    wrapped_cue = VideoOverlay.wrap_caption_text(cue_text, current_font_size, target_width)
+
                                     txt_clip_kwargs = {
-                                        "text": cue_text,
+                                        "text": wrapped_cue,
                                         "font": font_resolved,
                                         "font_size": current_font_size,
                                         "color": text_color,
                                         "stroke_color": stroke_color,
                                         "stroke_width": stroke_width,
-                                        "size": (target_width, None),
+                                        "size": (None, None),
                                         "text_align": "center"
                                     }
                                     if bg_color:
@@ -206,8 +215,9 @@ class VideoOverlay:
                                         txt_clip_kwargs["margin"] = clip_margin
 
                                     txt_clip = TextClip(**txt_clip_kwargs)
+                                    clip_w = int(txt_clip.size[0])
                                     clip_h = int(txt_clip.size[1])
-                                    if clip_h <= safe_zone_max_h or current_font_size <= 32:
+                                    if (clip_h <= safe_zone_max_h and clip_w <= target_width) or current_font_size <= 32:
                                         break
                                     current_font_size = int(current_font_size * 0.85)
                                 except Exception as txt_build_err:

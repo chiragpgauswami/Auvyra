@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Callable
 from loguru import logger
 from backend.app.ai.gateway import AIGateway
@@ -82,6 +83,10 @@ class VideoService:
         job = await self.job_repo.find_by_id(job_id, user_id=user_id)
         return serialize_doc(job)
     
+    async def get_latest_video(self, user_id: str, channel_id: Optional[str] = None) -> Optional[dict]:
+        video = await self.video_repo.find_latest_by_channel(user_id=user_id, channel_id=channel_id)
+        return serialize_doc(video)
+
     async def process_video_job(self, job: dict, progress_callback: Optional[Callable[[PipelineProgress], None]] = None) -> dict:
         """Executed by worker to generate video assets and persist metadata to MongoDB."""
         payload = job.get("payload", {})
@@ -92,6 +97,21 @@ class VideoService:
         
         # Mark video status as generating
         await self.video_repo.update_status(video_id, user_id=user_id, status="generating")
+
+        # Resolve caption style from request or channel default
+        from backend.app.repositories.caption_styles import CaptionStyleRepository
+        caption_repo = CaptionStyleRepository(self.video_repo.db)
+        caption_style = request_data.get("caption_style")
+        if not caption_style and channel_id:
+            try:
+                cfg = await caption_repo.get_channel_config(channel_id, user_id=user_id)
+                if cfg:
+                    caption_style = cfg.get("custom_overrides") or cfg.get("preset") or "bold"
+            except Exception as ce:
+                logger.debug(f"Caption config lookup: {ce}")
+
+        # Default video_source to pexels unless explicitly specified
+        video_source = request_data.get("video_source") or "pexels"
         
         # Construct VideoGenerationRequest
         gen_request = VideoGenerationRequest(
@@ -99,12 +119,13 @@ class VideoService:
             script=request_data.get("script", ""),
             duration=int(request_data.get("duration", 45)),
             aspect_ratio=request_data.get("aspect_ratio", "9:16"),
-            voice_name=request_data.get("voice_name", "en-US-AriaNeural"),
+            voice_name=request_data.get("voice_name", "en-US-AriaNeural-Female"),
             voice_rate=float(request_data.get("voice_rate", 1.0)),
             subtitle_enabled=bool(request_data.get("subtitle_enabled", True)),
-            font_size=int(request_data.get("font_size", 60)),
+            font_size=int(request_data.get("font_size", 54)),
             text_color=request_data.get("text_color", "#FFFFFF"),
-            video_source=request_data.get("video_source", "local"),
+            video_source=video_source,
+            caption_style=caption_style if isinstance(caption_style, dict) else ({"preset": caption_style} if caption_style else None),
             output_dir=request_data.get("output_dir", "")
         )
         
@@ -128,16 +149,35 @@ class VideoService:
             final_file_path = result.video_path
             
         stream_url = f"/api/videos/{video_id}/stream"
+
+        # Generate thumbnail
+        final_thumb_path = None
+        try:
+            from backend.app.services.thumbnail_service import ThumbnailService
+            thumb_dir = os.path.join(media_root, "thumbnails", str(channel_id))
+            os.makedirs(thumb_dir, exist_ok=True)
+            thumb_file = os.path.join(thumb_dir, f"{video_id}.jpg")
+            thumb_service = ThumbnailService(output_dir=thumb_dir)
+            thumb_service.extract_best_frame(final_file_path, thumb_file)
+            if os.path.exists(thumb_file):
+                final_thumb_path = os.path.abspath(thumb_file)
+        except Exception as th_err:
+            logger.warning(f"Failed to generate thumbnail: {th_err}")
         
+        now_completed = datetime.now(timezone.utc)
         # Update video record with generated metadata
         update_data = {
             "status": "generated",
             "file_path": final_file_path,
             "stream_url": stream_url,
+            "thumbnail_path": final_thumb_path,
+            "thumbnail_url": f"/api/videos/{video_id}/thumbnail" if final_thumb_path else None,
             "duration": result.duration,
             "width": result.width,
             "height": result.height,
-            "size_bytes": result.size_bytes
+            "size_bytes": result.size_bytes,
+            "completed_at": now_completed,
+            "updated_at": now_completed
         }
         await self.video_repo.update_one(video_id, update_data, user_id=user_id)
         
@@ -146,6 +186,7 @@ class VideoService:
             await self.asset_repo.create_asset({
                 "video_id": video_id,
                 "user_id": user_id,
+                "channel_id": str(channel_id),
                 "asset_type": "audio",
                 "file_path": result.audio_path,
                 "duration": result.duration
@@ -154,14 +195,53 @@ class VideoService:
             await self.asset_repo.create_asset({
                 "video_id": video_id,
                 "user_id": user_id,
+                "channel_id": str(channel_id),
                 "asset_type": "subtitle",
                 "file_path": result.subtitle_path,
                 "duration": result.duration
             })
+
+        # Record scene provenance
+        if getattr(result, "media_items", None):
+            for idx, m in enumerate(result.media_items):
+                try:
+                    p_id = getattr(m, "pexels_id", None) or getattr(m, "id", None)
+                    photog = getattr(m, "photographer", None)
+                    photog_url = getattr(m, "photographer_url", None)
+                    v_url = getattr(m, "video_url", None) or getattr(m, "url", "")
+                    d_url = getattr(m, "download_url", "")
+                    l_path = getattr(m, "local_path", str(m))
+                    m_dur = float(getattr(m, "duration", 0.0))
+                    m_w = int(getattr(m, "width", 1080))
+                    m_h = int(getattr(m, "height", 1920))
+                    m_sha = getattr(m, "sha256", "")
+                    q_term = getattr(m, "query", "") or getattr(m, "search_term", "")
+                    sc_id = getattr(m, "scene_id", f"scene_{idx}")
+                    await self.asset_repo.record_scene_provenance(
+                        user_id=user_id,
+                        channel_id=str(channel_id),
+                        video_id=str(video_id),
+                        scene_id=sc_id,
+                        pexels_id=p_id,
+                        photographer=photog,
+                        photographer_url=photog_url,
+                        video_url=v_url,
+                        download_url=d_url,
+                        width=m_w,
+                        height=m_h,
+                        duration=m_dur,
+                        sha256=m_sha,
+                        local_path=l_path,
+                        query=q_term
+                    )
+                except Exception as prov_err:
+                    logger.debug(f"Provenance record non-critical skip: {prov_err}")
             
-        result_dict = result.model_dump()
+        result_dict = result.model_dump(exclude={"media_items", "storyboard"})
         result_dict["stream_url"] = stream_url
         result_dict["video_id"] = str(video_id)
+        result_dict["thumbnail_path"] = final_thumb_path
+        result_dict["thumbnail_url"] = f"/api/videos/{video_id}/thumbnail" if final_thumb_path else None
         result_dict["permanent_path"] = final_file_path
         return result_dict
     

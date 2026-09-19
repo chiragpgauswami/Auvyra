@@ -23,6 +23,9 @@ const Create = () => {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [selectedChannelId, setSelectedChannelId] = useState<string>("");
   const [jobId, setJobId] = useState<string | null>(null);
+  const [isPollingActive, setIsPollingActive] = useState(false);
+  const [completedVideo, setCompletedVideo] = useState<any | null>(null);
+  const [captionStyle, setCaptionStyle] = useState<string>("channel_default");
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
   const [isRewritingScript, setIsRewritingScript] = useState(false);
   const [currentScriptId, setCurrentScriptId] = useState<string | null>(null);
@@ -52,6 +55,55 @@ const Create = () => {
     };
     fetchChannels();
   }, []);
+
+  // Recover active job or recent completed video upon reload or channel selection
+  useEffect(() => {
+    if (!selectedChannelId) return;
+
+    const recoverState = async () => {
+      try {
+        // 1. Check for active processing job first
+        const activeRes = await client.get<{ job: any | null }>("/jobs/active");
+        if (activeRes.data?.job && activeRes.data.job.status === "processing") {
+          const activeJob = activeRes.data.job;
+          setJobId(activeJob._id || activeJob.id);
+          setIsPollingActive(true);
+          return;
+        }
+
+        // 2. Check saved video from localStorage
+        const savedVideoId = localStorage.getItem(
+          `auvyra_last_video_${selectedChannelId}`,
+        );
+        if (savedVideoId) {
+          try {
+            const vidRes = await client.get(`/videos/${savedVideoId}`);
+            if (vidRes.data) {
+              setCompletedVideo(vidRes.data);
+              return;
+            }
+          } catch {
+            localStorage.removeItem(`auvyra_last_video_${selectedChannelId}`);
+          }
+        }
+
+        // 3. Alternatively check latest video from backend
+        const latestRes = await client.get<{ video: any | null }>(
+          `/videos/latest?channel_id=${selectedChannelId}`,
+        );
+        if (
+          latestRes.data?.video &&
+          latestRes.data.video.status === "generated"
+        ) {
+          setCompletedVideo(latestRes.data.video);
+        }
+      } catch (err) {
+        console.debug("Recovery check skipped:", err);
+      }
+    };
+
+    recoverState();
+  }, [selectedChannelId]);
 
   const handleGenerateScript = async () => {
     if (!formData.topic.trim()) {
@@ -92,7 +144,6 @@ const Create = () => {
         setFormData((prev) => ({ ...prev, script: res.script_text }));
         toast.success(`Rewritten: ${instruction} (v${res.version})`);
       } else {
-        // Fallback if not saved as script yet
         toast("Generating a fresh script with selected tone...");
         const res = await generateScript(
           selectedChannelId,
@@ -121,7 +172,46 @@ const Create = () => {
     }
   };
 
-  const { data: progress } = usePolling(fetchProgress, 2000, !!jobId);
+  const { data: progress } = usePolling(
+    fetchProgress,
+    2000,
+    isPollingActive && !!jobId,
+    (res) => {
+      if (
+        res?.status === "completed" ||
+        res?.status === "failed" ||
+        res?.status === "cancelled" ||
+        (typeof res?.percent === "number" && res.percent >= 100)
+      ) {
+        setIsPollingActive(false);
+        return true;
+      }
+      return false;
+    },
+  );
+
+  useEffect(() => {
+    if (progress?.status === "completed" || (progress?.percent ?? 0) >= 100) {
+      setIsPollingActive(false);
+      const vidId = progress?.result?.video_id || progress?.result?.id;
+      if (vidId) {
+        localStorage.setItem(`auvyra_last_video_${selectedChannelId}`, vidId);
+        client
+          .get(`/videos/${vidId}`)
+          .then((res) => {
+            setCompletedVideo(res.data);
+          })
+          .catch(() => {
+            setCompletedVideo(progress.result);
+          });
+      }
+    } else if (progress?.status === "failed") {
+      setIsPollingActive(false);
+      toast.error(
+        `Generation failed: ${progress.error || progress.message || "Unknown error"}`,
+      );
+    }
+  }, [progress, selectedChannelId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -134,12 +224,22 @@ const Create = () => {
       return;
     }
     try {
+      setCompletedVideo(null);
       const res = await generateVideo({
         channel_id: selectedChannelId,
-        request_data: formData,
+        request_data: {
+          ...formData,
+          video_source: "pexels",
+          ...(captionStyle !== "channel_default"
+            ? { caption_style: captionStyle }
+            : {}),
+        },
       });
       setJobId(res.job_id);
-      toast.success("Video generation started!");
+      setIsPollingActive(true);
+      toast.success(
+        "Video generation started with scene-specific Pexels footage!",
+      );
     } catch (error: any) {
       const msg =
         error.response?.data?.detail?.message ||
@@ -314,14 +414,51 @@ const Create = () => {
                 </div>
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Caption Style
+                </label>
+                <select
+                  className="input-field bg-slate-900"
+                  value={captionStyle}
+                  onChange={(e) => setCaptionStyle(e.target.value)}
+                >
+                  <option value="channel_default">
+                    Channel Default (Dynamic)
+                  </option>
+                  <option value="bold">
+                    Bold (High Impact Yellow, Safe-Zone Centered)
+                  </option>
+                  <option value="classic">
+                    Classic (Clean White Uppercase)
+                  </option>
+                  <option value="kinetic">
+                    Kinetic (Dynamic Multi-Color Accents)
+                  </option>
+                  <option value="minimal">
+                    Minimal (Subtle Scrim & Clean Typography)
+                  </option>
+                  <option value="highlight_word">
+                    Highlight Word (Golden Accent Focus)
+                  </option>
+                  <option value="typewriter">
+                    Typewriter (Crisp Monospace Dark Badge)
+                  </option>
+                </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  Applies high-retention subtitles with snug padding inside
+                  YouTube Shorts safe zone (62%-76%).
+                </p>
+              </div>
+
               <div className="pt-4 flex justify-end">
                 <button
                   type="submit"
-                  disabled={!!jobId && progress?.percent !== 100}
+                  disabled={isPollingActive}
                   className="btn-primary flex items-center gap-2"
                 >
                   <Wand2 className="w-4 h-4" />
-                  Generate Video
+                  {isPollingActive ? "Generating..." : "Generate Video"}
                 </button>
               </div>
             </form>
@@ -329,8 +466,8 @@ const Create = () => {
         </div>
 
         <div className="space-y-6">
-          <Card title="Status">
-            {jobId ? (
+          <Card title="Status & Preview">
+            {isPollingActive && jobId ? (
               <div className="space-y-4">
                 <ProgressBar
                   progress={progress?.percent || 0}
@@ -339,55 +476,82 @@ const Create = () => {
                 <p className="text-sm text-slate-400">
                   {progress?.message || "Preparing pipeline"}
                 </p>
+              </div>
+            ) : completedVideo ? (
+              <div className="p-4 bg-slate-900 border border-emerald-500/30 rounded-lg text-center space-y-4">
+                <div className="flex items-center justify-center gap-2 text-emerald-400 font-semibold">
+                  <PlaySquare className="w-5 h-5" />
+                  <span>Video Generated Successfully!</span>
+                </div>
 
-                {progress?.percent === 100 && (
-                  <div className="mt-6 p-4 bg-slate-900 border border-emerald-500/30 rounded-lg text-center space-y-4">
-                    <div className="flex items-center justify-center gap-2 text-emerald-400 font-semibold">
-                      <PlaySquare className="w-5 h-5" />
-                      <span>Video Generated Successfully!</span>
-                    </div>
+                <div className="overflow-hidden rounded-lg border border-slate-800 bg-black flex items-center justify-center">
+                  <video
+                    controls
+                    playsInline
+                    className="w-full max-h-[380px] object-contain rounded-lg"
+                    src={`/api/videos/${completedVideo.id || completedVideo._id || completedVideo.video_id}/stream${localStorage.getItem("access_token") ? `?token=${encodeURIComponent(localStorage.getItem("access_token") || "")}` : ""}`}
+                  >
+                    Your browser does not support HTML5 video preview.
+                  </video>
+                </div>
 
-                    {/* Browser Video Preview */}
-                    <div className="overflow-hidden rounded-lg border border-slate-800 bg-black flex items-center justify-center">
-                      <video
-                        controls
-                        playsInline
-                        className="w-full max-h-[380px] object-contain rounded-lg"
-                        src={
-                          progress.result?.video_id
-                            ? `/api/videos/${progress.result.video_id}/stream${localStorage.getItem("access_token") ? `?token=${encodeURIComponent(localStorage.getItem("access_token") || "")}` : ""}`
-                            : progress.result?.stream_url || ""
-                        }
-                      >
-                        Your browser does not support HTML5 video preview.
-                      </video>
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row gap-2 pt-2">
-                      <a
-                        href={
-                          progress.result?.video_id
-                            ? `/api/videos/${progress.result.video_id}/download${localStorage.getItem("access_token") ? `?token=${encodeURIComponent(localStorage.getItem("access_token") || "")}` : ""}`
-                            : "#"
-                        }
-                        download
-                        className="btn-secondary text-xs flex-1 flex items-center justify-center gap-1.5 py-2"
-                      >
-                        Download MP4
-                      </a>
-                      <a
-                        href="/publishing"
-                        className="btn-primary text-xs flex-1 flex items-center justify-center gap-1.5 py-2"
-                      >
-                        Publish to YouTube
-                      </a>
-                    </div>
+                <div className="text-left bg-slate-950 p-3 rounded text-xs space-y-1 text-slate-400 border border-slate-800/80">
+                  <div className="flex justify-between">
+                    <span>Title:</span>
+                    <span className="text-white font-medium truncate max-w-[200px]">
+                      {completedVideo.title}
+                    </span>
                   </div>
-                )}
+                  <div className="flex justify-between">
+                    <span>Duration:</span>
+                    <span className="text-slate-200 font-medium">
+                      {completedVideo.duration
+                        ? `${completedVideo.duration.toFixed(1)}s`
+                        : "45.0s"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Resolution:</span>
+                    <span className="text-slate-200 font-medium">
+                      {completedVideo.width || 1080}x
+                      {completedVideo.height || 1920}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                  <a
+                    href={`/api/videos/${completedVideo.id || completedVideo._id || completedVideo.video_id}/download${localStorage.getItem("access_token") ? `?token=${encodeURIComponent(localStorage.getItem("access_token") || "")}` : ""}`}
+                    download
+                    className="btn-secondary text-xs flex-1 flex items-center justify-center gap-1.5 py-2"
+                  >
+                    Download MP4
+                  </a>
+                  <a
+                    href="/publishing"
+                    className="btn-primary text-xs flex-1 flex items-center justify-center gap-1.5 py-2"
+                  >
+                    Publish to YouTube
+                  </a>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCompletedVideo(null);
+                    setJobId(null);
+                    localStorage.removeItem(
+                      `auvyra_last_video_${selectedChannelId}`,
+                    );
+                  }}
+                  className="text-xs text-slate-500 hover:text-slate-300 underline pt-2 block mx-auto"
+                >
+                  Create Another Video
+                </button>
               </div>
             ) : (
               <div className="text-center py-8 text-slate-500 text-sm">
-                Submit the form to start generation.
+                Submit the form to start video generation.
               </div>
             )}
           </Card>

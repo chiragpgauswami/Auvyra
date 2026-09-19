@@ -13,25 +13,38 @@ export interface PublishingJob {
 
 export interface CalendarEvent {
   job_id: string;
-  video_id: string;
+  queue_item_id?: string;
+  channel_id?: string;
+  channel_name?: string;
+  video_id?: string | null;
   title: string;
+  topic?: string;
   status: string;
+  current_stage?: string | null;
+  display_status?: string;
+  approval_status?: string;
+  publish_status?: string;
+  scheduled_at?: string;
   date: string;
+  timezone?: string;
   platform: string;
-  thumbnail_url?: string;
+  thumbnail_url?: string | null;
 }
 
 export const createPublishingJob = async (
   videoId: string,
   metadata: Record<string, any> = {},
-  scheduledAt?: string
+  scheduledAt?: string,
 ) => {
-  const res = await client.post<{ job_id: string; job: PublishingJob }>("/publishing", {
-    video_id: videoId,
-    platform: "youtube",
-    metadata,
-    scheduled_at: scheduledAt || null,
-  });
+  const res = await client.post<{ job_id: string; job: PublishingJob }>(
+    "/publishing",
+    {
+      video_id: videoId,
+      platform: "youtube",
+      metadata,
+      scheduled_at: scheduledAt || null,
+    },
+  );
   return res.data;
 };
 

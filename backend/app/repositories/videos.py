@@ -6,11 +6,20 @@ class VideoRepository(BaseRepository):
     def __init__(self, db: AsyncIOMotorDatabase):
         super().__init__(db, "videos")
 
-    async def find_by_channel(self, user_id: str, channel_id: str, status: str = None) -> list[dict]:
-        query = {"user_id": user_id, "channel_id": channel_id}
-        if status:
+    async def find_by_channel(self, user_id: str, channel_id: str = None, status: str = None, limit: int = 100) -> list[dict]:
+        query = {"user_id": user_id}
+        if channel_id:
+            query["channel_id"] = channel_id
+        if status and status != "all":
             query["status"] = status
-        return await self.find_many(query)
+        return await self.find_many(query, limit=limit, sort=[("created_at", -1)])
+
+    async def find_latest_by_channel(self, user_id: str, channel_id: str = None) -> dict | None:
+        query = {"user_id": user_id}
+        if channel_id:
+            query["channel_id"] = channel_id
+        results = await self.find_many(query, limit=1, sort=[("created_at", -1)])
+        return results[0] if results else None
 
     async def find_by_status(self, user_id: str, status: str) -> list[dict]:
         return await self.find_many({"user_id": user_id, "status": status})
