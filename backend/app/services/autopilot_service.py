@@ -28,7 +28,7 @@ from backend.app.autopilot.qa import QAEngine
 from backend.app.repositories.channels import ChannelRepository, AutopilotQueueRepository
 from backend.app.repositories.brain import ChannelBrainRepository
 from backend.app.repositories.autopilot_events import AutopilotEventsRepository
-from backend.app.repositories.videos import VideoRepository
+from backend.app.repositories.videos import VideoRepository, VideoAssetRepository
 from backend.app.repositories.jobs import NotificationRepository
 from backend.app.repositories.users import OAuthAccountRepository
 from backend.app.services.research_service import ResearchService
@@ -43,8 +43,8 @@ from backend.app.video.audio.edge_tts_provider import EdgeTTSProvider
 from backend.app.video.subtitles.generator import SubtitleGenerator
 from backend.app.video.composition.assembler import VideoAssembler
 from backend.app.video.composition.overlay import VideoOverlay
-from backend.app.video.models import VideoAspect, VideoGenerationRequest
 from backend.app.video.pipeline import VideoGenerationService
+from backend.app.video.models import VideoAspect, VideoGenerationRequest
 from backend.app.youtube.client import get_youtube_client_for_channel, YouTubeAPIError
 from backend.app.ai.gateway import AIGateway
 from backend.app.utils.serializers import serialize_doc
@@ -94,6 +94,7 @@ class AutopilotService:
         self.channel_repo = ChannelRepository(db)
         self.brain_repo = ChannelBrainRepository(db)
         self.video_repo = VideoRepository(db)
+        self.asset_repo = VideoAssetRepository(db)
         self.notification_repo = NotificationRepository(db)
         self.oauth_repo = OAuthAccountRepository(db)
 
@@ -643,6 +644,35 @@ class AutopilotService:
                             downloaded_clips.append(local_path)
                             clip_downloaded = True
                             logger.info(f"Pexels downloaded scene {idx+1}/{len(scenes)}: {clean_query} -> {os.path.basename(local_path)}")
+                            
+                            # Record scene provenance in MongoDB video_assets with strict channel isolation
+                            try:
+                                h = hashlib.sha256()
+                                with open(local_path, "rb") as f:
+                                    while chunk := f.read(65536):
+                                        h.update(chunk)
+                                clip_sha256 = h.hexdigest()
+
+                                await self.asset_repo.record_scene_provenance(
+                                    user_id=slot["user_id"],
+                                    channel_id=slot["channel_id"],
+                                    video_id=slot_id,
+                                    scene_id=str(sc.get("scene_id") or f"scene_{idx+1}"),
+                                    pexels_id=getattr(target_item, "pexels_id", None),
+                                    photographer=getattr(target_item, "photographer", None),
+                                    photographer_url=getattr(target_item, "photographer_url", None),
+                                    video_url=getattr(target_item, "video_url", None),
+                                    download_url=getattr(target_item, "download_url", getattr(target_item, "url", None)),
+                                    width=getattr(target_item, "width", 0),
+                                    height=getattr(target_item, "height", 0),
+                                    duration=float(getattr(target_item, "duration", 0.0) or sc.get("duration", 3.0)),
+                                    sha256=clip_sha256,
+                                    local_path=local_path,
+                                    query=clean_query,
+                                    selected_at=datetime.now(timezone.utc).isoformat()
+                                )
+                            except Exception as prov_err:
+                                logger.warning(f"Failed to record scene asset provenance: {prov_err}")
                             break
                 except Exception as pe:
                     logger.warning(f"Pexels query '{clean_query}' error: {pe}")
@@ -657,12 +687,42 @@ class AutopilotService:
                         min_duration=3
                     )
                     if items:
-                        local_path = await pexels.download(items[0], dest_dir)
+                        target_item = items[0]
+                        local_path = await pexels.download(target_item, dest_dir)
                         if os.path.exists(local_path) and os.path.getsize(local_path) > 1024:
                             downloaded_clips.append(local_path)
                             clip_downloaded = True
+                            
+                            try:
+                                h = hashlib.sha256()
+                                with open(local_path, "rb") as f:
+                                    while chunk := f.read(65536):
+                                        h.update(chunk)
+                                clip_sha256 = h.hexdigest()
+
+                                await self.asset_repo.record_scene_provenance(
+                                    user_id=slot["user_id"],
+                                    channel_id=slot["channel_id"],
+                                    video_id=slot_id,
+                                    scene_id=str(sc.get("scene_id") or f"scene_{idx+1}"),
+                                    pexels_id=getattr(target_item, "pexels_id", None),
+                                    photographer=getattr(target_item, "photographer", None),
+                                    photographer_url=getattr(target_item, "photographer_url", None),
+                                    video_url=getattr(target_item, "video_url", None),
+                                    download_url=getattr(target_item, "download_url", getattr(target_item, "url", None)),
+                                    width=getattr(target_item, "width", 0),
+                                    height=getattr(target_item, "height", 0),
+                                    duration=float(getattr(target_item, "duration", 0.0) or sc.get("duration", 3.0)),
+                                    sha256=clip_sha256,
+                                    local_path=local_path,
+                                    query=fallback_query,
+                                    selected_at=datetime.now(timezone.utc).isoformat()
+                                )
+                            except Exception as prov_err:
+                                logger.warning(f"Failed to record fallback scene asset provenance: {prov_err}")
                 except Exception:
                     pass
+
 
             if not clip_downloaded:
                 # Requirement 3: Never silently use fixed.mp4/sample.mp4. Explicit failure!
@@ -709,8 +769,8 @@ class AutopilotService:
 
     async def _stage_subtitles(self, slot: dict, channel: dict, artifacts: dict) -> dict:
         """
-        Real Whisper Subtitle Generation (Requirement 4).
-        Uses faster-whisper on actual generated TTS audio.
+        Real Whisper Subtitle Generation (Requirement 4 & Phase 21 Hardened Rules).
+        Uses faster-whisper on actual generated TTS audio with 1-3 word cadence.
         """
         if artifacts.get("subtitle_path") and os.path.exists(artifacts["subtitle_path"]):
             return {"subtitle_path": artifacts["subtitle_path"]}
@@ -725,9 +785,9 @@ class AutopilotService:
         srt_path = os.path.join(out_dir, f"subs_{slot_id}.srt")
 
         try:
-            # Transcribe real TTS audio using faster-whisper
-            self.sub_gen.create_from_audio(audio_path, srt_path, word_level=False)
-            
+            # Transcribe real TTS audio using faster-whisper with 1-3 word cadence
+            self.sub_gen.create_from_audio(audio_path, srt_path, word_level=True, shorts_cadence=True)
+
             if not os.path.exists(srt_path) or os.path.getsize(srt_path) < 10:
                 raise WhisperSubtitleError("Whisper failed to produce valid subtitle file")
 
@@ -739,7 +799,8 @@ class AutopilotService:
         if artifacts.get("video_path") and os.path.exists(artifacts["video_path"]):
             return {
                 "video_path": artifacts["video_path"],
-                "rendered_duration": artifacts.get("rendered_duration")
+                "rendered_duration": artifacts.get("rendered_duration"),
+                "stock_coverage_ratio": artifacts.get("stock_coverage_ratio", 1.0)
             }
 
         scene_clips = artifacts.get("scene_clips", [])
@@ -755,7 +816,7 @@ class AutopilotService:
         final_video_path = os.path.join(out_dir, f"video_{slot_id}.mp4")
 
         try:
-            # 1. Assemble clips to match audio duration
+            # 1. Assemble clips to match audio duration and calculate interval union stock coverage
             self.assembler.assemble_clips(
                 video_paths=scene_clips,
                 audio_duration=audio_duration,
@@ -763,6 +824,9 @@ class AutopilotService:
                 output_path=raw_composed_path,
                 fit_mode="cover"
             )
+
+            coverage_report = getattr(self.assembler, "last_coverage_report", {}) or {}
+            coverage_ratio = float(coverage_report.get("coverage_ratio", 1.0))
 
             # 2. Overlay narration audio, subtitles, and top header banner
             req = VideoGenerationRequest(
@@ -783,26 +847,32 @@ class AutopilotService:
 
             return {
                 "video_path": final_video_path,
-                "rendered_duration": audio_duration
+                "rendered_duration": audio_duration,
+                "stock_coverage_ratio": coverage_ratio
             }
         except Exception as e:
             raise RenderError(f"Video rendering and composition failed: {str(e)}")
 
     async def _stage_qa(self, slot: dict, channel: dict, artifacts: dict) -> dict:
         """
-        Mandatory QA Gate (Requirement 5).
+        Mandatory QA Gate (Requirement 5 & Phase 21 Hardened Rules).
         QA failure strictly blocks publishing.
         """
         video_path = artifacts.get("video_path")
         subtitle_path = artifacts.get("subtitle_path")
+        stock_coverage_ratio = artifacts.get("stock_coverage_ratio")
+        scene_clips = artifacts.get("scene_clips", [])
 
         # QAEngine raises QAGateError on any failure
         qa_report = self.qa_engine.inspect_and_gate(
             video_path=video_path,
             subtitle_path=subtitle_path,
-            expected_format=slot.get("format", "shorts")
+            expected_format=slot.get("format", "shorts"),
+            stock_coverage_ratio=stock_coverage_ratio,
+            scene_clips=scene_clips
         )
         return {"qa_report": qa_report, "qa_passed": True}
+
 
     async def _stage_metadata(self, slot: dict, channel: dict, brain: dict, artifacts: dict) -> dict:
         topic = artifacts.get("topic") or slot.get("topic")

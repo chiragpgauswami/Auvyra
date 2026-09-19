@@ -196,14 +196,15 @@ def validate_video_content(
             
     # 4. Sample and inspect representative frames
     os.makedirs(qa_dir, exist_ok=True)
-    percentages = [0.0, 0.10, 0.25, 0.50, 0.75, 0.90]
+    percentages = [0.05, 0.20, 0.40, 0.60, 0.80, 0.95]
     frame_metrics: List[FrameMetrics] = []
-    
+    sampled_arrays: List[np.ndarray] = []
+
     for p in percentages:
         t = min(video_duration * p, max(0.0, video_duration - 0.1))
         frame_name = f"frame_{int(p*100):02d}.png"
         frame_path = os.path.join(qa_dir, frame_name)
-        
+
         sample_cmd = [
             ffmpeg_bin, "-y",
             "-ss", f"{t:.3f}",
@@ -212,26 +213,27 @@ def validate_video_content(
             frame_path
         ]
         sample_res = subprocess.run(sample_cmd, capture_output=True, timeout=30)
-        
+
         if not os.path.exists(frame_path) or os.path.getsize(frame_path) == 0:
             failure_reasons.append(f"Failed to capture frame at {int(p*100)}% (t={t:.2f}s)")
             continue
-            
+
         try:
             img = Image.open(frame_path).convert("RGB")
             arr = np.array(img, dtype=np.float32)
-            
+            sampled_arrays.append(arr)
+
             # Compute luminance using ITU-R BT.601 standard: Y = 0.299*R + 0.587*G + 0.114*B
             lum = 0.299 * arr[:, :, 0] + 0.587 * arr[:, :, 1] + 0.114 * arr[:, :, 2]
             mean_lum = float(np.mean(lum))
             pixel_var = float(np.std(lum))
-            
+
             # Fraction of pixels nearly pitch black (< 12 out of 255)
             near_black = float(np.mean(lum < 12.0))
-            
+
             # A frame is blank if standard deviation is almost zero or it's almost 100% black
             is_blank = (pixel_var < min_variance) or (near_black > max_near_black_ratio and mean_lum < 15.0)
-            
+
             metric = FrameMetrics(
                 percentage=p,
                 timestamp=t,
@@ -242,7 +244,7 @@ def validate_video_content(
                 is_blank=is_blank
             )
             frame_metrics.append(metric)
-            
+
             if is_blank:
                 failure_reasons.append(
                     f"Frame at {int(p*100)}% (t={t:.2f}s) is effectively blank/black: "
@@ -250,6 +252,17 @@ def validate_video_content(
                 )
         except Exception as e:
             failure_reasons.append(f"Error analyzing frame {frame_name}: {e}")
+
+    # 5. Static Placeholder Detection (zero visual motion across timeline)
+    if len(sampled_arrays) >= 4 and video_duration >= 5.0:
+        static_diffs = []
+        for i in range(1, len(sampled_arrays)):
+            if sampled_arrays[i].shape == sampled_arrays[i-1].shape:
+                diff = float(np.mean(np.abs(sampled_arrays[i] - sampled_arrays[i-1])))
+                static_diffs.append(diff)
+        if static_diffs and np.mean(static_diffs) < 1.0:
+            failure_reasons.append("Static placeholder video detected: zero visual movement across timeline frames")
+
 
     # Overall validation judgment
     is_valid = len(failure_reasons) == 0

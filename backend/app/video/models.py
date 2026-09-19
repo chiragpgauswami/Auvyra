@@ -26,8 +26,16 @@ class MediaItem(BaseModel):
     height: int = 0
     search_term: str = ""
     scene_index: Optional[int] = None
+    scene_id: Optional[str] = None
     crop_mode: Optional[str] = "cover"
     file_size: Optional[int] = 0
+    pexels_id: Optional[int] = None
+    photographer: Optional[str] = None
+    photographer_url: Optional[str] = None
+    video_url: Optional[str] = None
+    download_url: Optional[str] = None
+    sha256: Optional[str] = None
+    selected_at: Optional[str] = None
 
 class TTSResult(BaseModel):
     audio_path: str

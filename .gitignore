@@ -36,6 +36,16 @@ dist/
 .env.local
 
 # Project specific
-media/
+/media/
+*.mp4
+*.mov
+*.webm
+*.mp3
+*.wav
+*.m4a
+tmp/
+.cache/
+artifacts/
 client_secret*.json
 *.credentials.json
+
