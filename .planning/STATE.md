@@ -2,8 +2,8 @@
 
 **Last Updated:** 2026-09-19  
 **Current Milestone:** Milestone 2 — Channel-Centric Autonomous YouTube Operating System  
-**Current Phase:** Phase 20 (Persistent Autopilot Scheduler & Granular Job Pipeline) — COMPLETED  
-**Next Phase:** Phase 21 (High-Retention Shorts Captions & Stock Composition)
+**Current Phase:** Phase 22 (Production Autopilot, Caption Style System & Closed-Loop Channel Intelligence) — COMPLETED  
+**Next Phase:** Phase 23 (Full Autonomous Acceptance & Browser Certification)
 
 ---
 
@@ -38,8 +38,8 @@
 | **18** | Multi-Account OAuth & Channel-Centric Data Model   | **COMPLETED** | 100% isolation, `oauth_account_id` ownership invariant, 12 integration tests |
 | **19** | AI Niche Discovery & Autopilot Setup Wizard Engine | **COMPLETED** | Real Ollama discovery, 7-day timezone schedule, 22 unit + integration tests  |
 | **20** | Persistent Autopilot Scheduler & Job Pipeline      | **COMPLETED** | 14 durable stages, QA gate, 76/76 unit+int tests, real pipeline audit script |
-| **21** | High-Retention Shorts Captions & Stock Composition |  **PENDING**  | Punchy multi-word captions, Pexels asset metadata persistence, QA            |
-| **22** | Channel Control Center & Frontend Autopilot Wizard |  **PENDING**  | `/channels/:id` control center, 8-step wizard modal, live activity feed      |
+| **21** | High-Retention Shorts Captions & Stock Composition | **COMPLETED** | Punchy multi-word captions, dynamic safe-zone, Pexels provenance, 27/27 tests |
+| **22** | Production Autopilot & Caption Style System        | **COMPLETED** | 6 caption presets, /channels/:id SaaS control center, 103/103 tests, audit script |
 | **23** | Full Autonomous Acceptance & Browser Certification |  **PENDING**  | End-to-end multi-channel browser acceptance, CodeRabbit review gate          |
 
 ---
@@ -54,5 +54,5 @@
 
 ## Next Steps
 
-1. Review and sign off Phase 20 completion.
-2. Advance sequentially to **Phase 21: High-Retention Shorts Captions & Stock Composition**.
+1. Review Phase 22 completion and visual frame outputs.
+2. Advance to **Phase 23: Full Autonomous Acceptance & Browser Certification**.
