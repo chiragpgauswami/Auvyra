@@ -195,6 +195,7 @@ class AutopilotQueueRepository(BaseRepository):
                     "status": "published",
                     "video_id": video_id,
                     "youtube_url": youtube_url,
+                    "published_url": youtube_url,
                     "published_at": now_utc,
                     "progress": 100,
                     "claimed_by": None,

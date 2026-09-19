@@ -359,12 +359,13 @@ class AutopilotService:
         progress = STAGE_PROGRESS.get(stage, 0)
 
         # 1. Mark stage started
+        queue_status = None if (slot.get("status") == "published" or stage == "learn") else f"producing_{stage}"
         await self.queue_repo.checkpoint_stage(
             slot_id=slot_id,
             stage=stage,
             status="in_progress",
             progress=progress,
-            queue_status=f"producing_{stage}"
+            queue_status=queue_status
         )
         await self.events_repo.record_event(
             channel_id=channel_id,

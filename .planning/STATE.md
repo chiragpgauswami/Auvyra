@@ -33,14 +33,14 @@
 
 ### Milestone 2: Channel-Centric Autonomous YouTube Operating System (Phases 18–23) — IN PROGRESS
 
-| Phase  | Description                                        |    Status     | Verification                                                                  |
-| :----: | :------------------------------------------------- | :-----------: | :---------------------------------------------------------------------------- |
-| **18** | Multi-Account OAuth & Channel-Centric Data Model   | **COMPLETED** | 100% isolation, `oauth_account_id` ownership invariant, 12 integration tests   |
-| **19** | AI Niche Discovery & Autopilot Setup Wizard Engine | **COMPLETED** | Real Ollama discovery, 7-day timezone schedule, 22 unit + integration tests    |
+| Phase  | Description                                        |    Status     | Verification                                                                 |
+| :----: | :------------------------------------------------- | :-----------: | :--------------------------------------------------------------------------- |
+| **18** | Multi-Account OAuth & Channel-Centric Data Model   | **COMPLETED** | 100% isolation, `oauth_account_id` ownership invariant, 12 integration tests |
+| **19** | AI Niche Discovery & Autopilot Setup Wizard Engine | **COMPLETED** | Real Ollama discovery, 7-day timezone schedule, 22 unit + integration tests  |
 | **20** | Persistent Autopilot Scheduler & Job Pipeline      | **COMPLETED** | 14 durable stages, QA gate, 76/76 unit+int tests, real pipeline audit script |
-| **21** | High-Retention Shorts Captions & Stock Composition |  **PENDING**  | Punchy multi-word captions, Pexels asset metadata persistence, QA             |
-| **22** | Channel Control Center & Frontend Autopilot Wizard |  **PENDING**  | `/channels/:id` control center, 8-step wizard modal, live activity feed       |
-| **23** | Full Autonomous Acceptance & Browser Certification |  **PENDING**  | End-to-end multi-channel browser acceptance, CodeRabbit review gate           |
+| **21** | High-Retention Shorts Captions & Stock Composition |  **PENDING**  | Punchy multi-word captions, Pexels asset metadata persistence, QA            |
+| **22** | Channel Control Center & Frontend Autopilot Wizard |  **PENDING**  | `/channels/:id` control center, 8-step wizard modal, live activity feed      |
+| **23** | Full Autonomous Acceptance & Browser Certification |  **PENDING**  | End-to-end multi-channel browser acceptance, CodeRabbit review gate          |
 
 ---
 
