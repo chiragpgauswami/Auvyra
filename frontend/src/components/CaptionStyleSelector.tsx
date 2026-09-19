@@ -154,7 +154,7 @@ export const CaptionStyleSelector: React.FC<CaptionStyleSelectorProps> = ({
 
                 {/* Styled Caption Pill / Box Simulation */}
                 <div
-                  className={`px-3 py-1.5 rounded-md text-center max-w-[90%] font-black uppercase tracking-wide shadow-md ${
+                  className={`px-4 py-2 rounded-md text-center max-w-[90%] font-black uppercase tracking-wide shadow-md ${
                     cfg.background_type === "none"
                       ? "bg-transparent drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]"
                       : "border border-slate-800/50"

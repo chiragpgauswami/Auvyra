@@ -124,7 +124,7 @@ class VideoOverlay:
                                 font_size=max(24, int(params.font_size * 0.48)),
                                 color="#38BDF8",  # Vibrant cyan accent
                                 bg_color=(15, 23, 42, 220),  # Dark translucent pill
-                                margin=(28, 12),
+                                margin=(32, 16),
                                 text_align="center"
                             )
                             .with_start(0)
@@ -161,10 +161,12 @@ class VideoOverlay:
                                 clip_margin = None
                             elif bg_type == "box":
                                 bg_color = (15, 23, 42, int(round(255 * bg_opacity)))
-                                clip_margin = (28, 14)
+                                pad_x, pad_y = 40, 22
+                                clip_margin = (max(0, pad_x - stroke_width), max(0, pad_y - stroke_width), pad_x + stroke_width, pad_y + stroke_width)
                             else:  # pill default
                                 bg_color = (15, 23, 42, int(round(255 * bg_opacity)))
-                                clip_margin = (36, 18)
+                                pad_x, pad_y = 48, 26
+                                clip_margin = (max(0, pad_x - stroke_width), max(0, pad_y - stroke_width), pad_x + stroke_width, pad_y + stroke_width)
 
                             pos_mode = caption_cfg.get("position", "safe_center")
                             if pos_mode == "lower_third":
@@ -179,7 +181,8 @@ class VideoOverlay:
                             stroke_color = params.stroke_color or "#000000"
                             stroke_width = int(params.stroke_width or 2)
                             bg_color = (15, 23, 42, 210)
-                            clip_margin = (36, 18)
+                            pad_x, pad_y = 48, 26
+                            clip_margin = (max(0, pad_x - stroke_width), max(0, pad_y - stroke_width), pad_x + stroke_width, pad_y + stroke_width)
                             target_ratio = 0.70
 
                         for idx, (start_sec, end_sec), text in srt_entries:
