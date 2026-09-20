@@ -296,7 +296,7 @@ const Publishing = () => {
                 const thumbSrc = getThumbnailUrl(
                   vid.thumbnail_url,
                   vid.thumbnail_path,
-                  vid.id
+                  vid.id,
                 );
 
                 return (
@@ -459,7 +459,7 @@ const Publishing = () => {
                   const thumbSrc = getThumbnailUrl(
                     evt.thumbnail_url,
                     null,
-                    evt.video_id
+                    evt.video_id,
                   );
 
                   return (

@@ -4,17 +4,22 @@
 export function getThumbnailUrl(
   thumbnailUrl?: string | null,
   thumbnailPath?: string | null,
-  videoId?: string | null
+  videoId?: string | null,
 ): string | null {
   const token = localStorage.getItem("access_token");
   const tokenParam = token ? `token=${encodeURIComponent(token)}` : "";
 
   if (thumbnailUrl) {
-    if (thumbnailUrl.startsWith("http://") || thumbnailUrl.startsWith("https://")) {
+    if (
+      thumbnailUrl.startsWith("http://") ||
+      thumbnailUrl.startsWith("https://")
+    ) {
       return thumbnailUrl;
     }
     const separator = thumbnailUrl.includes("?") ? "&" : "?";
-    return tokenParam ? `${thumbnailUrl}${separator}${tokenParam}` : thumbnailUrl;
+    return tokenParam
+      ? `${thumbnailUrl}${separator}${tokenParam}`
+      : thumbnailUrl;
   }
 
   if (videoId) {

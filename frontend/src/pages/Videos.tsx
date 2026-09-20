@@ -1,5 +1,6 @@
-import { Calendar, Clock, Download, PlaySquare, Share2, X } from "lucide-react";
+import { Calendar, Clock, Download, PlaySquare, Plus, Share2, Video as VideoIcon, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { listChannels } from "../api/channels";
 import { listVideos } from "../api/videos";
 import Card from "../components/Card";
@@ -82,6 +83,14 @@ const Videos = () => {
           >
             Refresh
           </button>
+
+          <Link
+            to="/create"
+            className="btn-primary text-xs py-1.5 px-3.5 flex items-center gap-1.5 font-medium shadow-md shadow-primary-500/20"
+          >
+            <Plus className="w-4 h-4" />
+            Create Video
+          </Link>
         </div>
       </div>
 
@@ -91,8 +100,21 @@ const Videos = () => {
             Loading videos...
           </div>
         ) : videos.length === 0 ? (
-          <div className="py-12 text-center text-slate-400">
-            No videos found. Create one!
+          <div className="py-16 text-center text-slate-400 space-y-4">
+            <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center mx-auto text-slate-500">
+              <VideoIcon className="w-6 h-6" />
+            </div>
+            <div>
+              <p className="text-white font-medium">No videos found</p>
+              <p className="text-xs text-slate-500 mt-1">Get started by creating your first high-retention video.</p>
+            </div>
+            <Link
+              to="/create"
+              className="btn-primary text-xs py-2 px-4 inline-flex items-center gap-2 font-medium"
+            >
+              <Plus className="w-4 h-4" />
+              Create Video
+            </Link>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -111,7 +133,7 @@ const Videos = () => {
                   const thumbSrc = getThumbnailUrl(
                     video.thumbnail_url,
                     video.thumbnail_path,
-                    video.id
+                    video.id,
                   );
 
                   return (

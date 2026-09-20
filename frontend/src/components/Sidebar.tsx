@@ -7,7 +7,6 @@ import {
   Send,
   Settings,
   Tv,
-  Video,
   X,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
@@ -22,7 +21,6 @@ const navItems = [
   { name: "Channels", path: "/channels", icon: Tv },
   { name: "AI Brain", path: "/brain", icon: Brain },
   { name: "Research", path: "/research", icon: Lightbulb },
-  { name: "Create", path: "/create", icon: Video },
   { name: "Videos", path: "/videos", icon: PlaySquare },
   { name: "Publishing", path: "/publishing", icon: Send },
   { name: "Analytics", path: "/analytics", icon: BarChart2 },

@@ -591,13 +591,17 @@ export const ChannelControlCenter: React.FC = () => {
                   className="group bg-slate-950/80 border border-slate-800 rounded-xl p-3 cursor-pointer hover:border-blue-500/50 transition duration-200"
                 >
                   <div className="relative aspect-[9/16] bg-slate-900 rounded-lg overflow-hidden mb-2">
-                    {getThumbnailUrl(v.thumbnail_url, v.thumbnail_path, v.id) ? (
+                    {getThumbnailUrl(
+                      v.thumbnail_url,
+                      v.thumbnail_path,
+                      v.id,
+                    ) ? (
                       <img
                         src={
                           getThumbnailUrl(
                             v.thumbnail_url,
                             v.thumbnail_path,
-                            v.id
+                            v.id,
                           ) || undefined
                         }
                         alt={v.title}

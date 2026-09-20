@@ -174,13 +174,17 @@ const Dashboard = () => {
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-slate-800 rounded flex items-center justify-center overflow-hidden flex-shrink-0">
-                      {getThumbnailUrl(video.thumbnail_url, video.thumbnail_path, video.id) ? (
+                      {getThumbnailUrl(
+                        video.thumbnail_url,
+                        video.thumbnail_path,
+                        video.id,
+                      ) ? (
                         <img
                           src={
                             getThumbnailUrl(
                               video.thumbnail_url,
                               video.thumbnail_path,
-                              video.id
+                              video.id,
                             ) || undefined
                           }
                           alt={video.title}
