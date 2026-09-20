@@ -10,6 +10,7 @@ router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 def get_job_repo(db = Depends(get_db)):
     return JobRepository(db)
 
+@router.get("", include_in_schema=False)
 @router.get("/")
 async def list_jobs(status: Optional[str] = Query(None), user: dict = Depends(require_auth), repo: JobRepository = Depends(get_job_repo)):
     jobs = await repo.find_by_user(str(user["_id"]), status=status)

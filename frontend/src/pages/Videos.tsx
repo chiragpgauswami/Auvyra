@@ -1,4 +1,13 @@
-import { Calendar, Clock, Download, PlaySquare, Plus, Share2, Video as VideoIcon, X } from "lucide-react";
+import {
+  Calendar,
+  Clock,
+  Download,
+  PlaySquare,
+  Plus,
+  Share2,
+  Video as VideoIcon,
+  X,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { listChannels } from "../api/channels";
@@ -106,7 +115,9 @@ const Videos = () => {
             </div>
             <div>
               <p className="text-white font-medium">No videos found</p>
-              <p className="text-xs text-slate-500 mt-1">Get started by creating your first high-retention video.</p>
+              <p className="text-xs text-slate-500 mt-1">
+                Get started by creating your first high-retention video.
+              </p>
             </div>
             <Link
               to="/create"

@@ -238,10 +238,12 @@ async def disconnect_youtube_channel(
         "message": "All connected YouTube channels safely disconnected. Historical data preserved."
     }
 
+@router.post("", status_code=status.HTTP_201_CREATED, include_in_schema=False)
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def create_channel(data: ChannelCreate, user: dict = Depends(require_auth), service: ChannelService = Depends(get_channel_service)):
     return await service.create_channel(str(user["_id"]), data.model_dump())
 
+@router.get("", include_in_schema=False)
 @router.get("/")
 async def list_channels(user: dict = Depends(require_auth), service: ChannelService = Depends(get_channel_service)):
     return await service.list_channels(str(user["_id"]))

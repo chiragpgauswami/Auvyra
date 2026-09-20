@@ -409,3 +409,58 @@ async def test_channel_brain_positioning_persisted(test_db):
     assert "Apex Wildlife" in brain["positioning"]
 
 
+@pytest.mark.asyncio
+async def test_publishing_endpoint_slash_insensitivity(test_db):
+    """Verify POST /api/publishing (no trailing slash) does not return 307 redirect."""
+    from httpx import AsyncClient, ASGITransport
+    from backend.app.main import app
+    from backend.app.config import get_settings
+    from backend.app.auth.service import AuthService
+
+    settings = get_settings()
+    auth_svc = AuthService(test_db, settings)
+
+    user_id = str(ObjectId())
+    await test_db["users"].insert_one({
+        "_id": ObjectId(user_id),
+        "email": "pub_test@example.com",
+        "name": "Pub User",
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc)
+    })
+    token = auth_svc.create_access_token(user_id)
+
+    vid_id = str(ObjectId())
+    await test_db["videos"].insert_one({
+        "_id": ObjectId(vid_id),
+        "user_id": user_id,
+        "title": "Slash Test Video",
+        "status": "generated"
+    })
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Without trailing slash
+        res_no_slash = await client.post(
+            "/api/publishing",
+            json={"video_id": vid_id},
+            headers={"Authorization": f"Bearer {token}"},
+            follow_redirects=False
+        )
+        assert res_no_slash.status_code == 201
+        data1 = res_no_slash.json()
+        assert "job_id" in data1
+
+        # With trailing slash
+        res_slash = await client.post(
+            "/api/publishing/",
+            json={"video_id": vid_id},
+            headers={"Authorization": f"Bearer {token}"},
+            follow_redirects=False
+        )
+        assert res_slash.status_code == 201
+        data2 = res_slash.json()
+        assert "job_id" in data2
+
+
+

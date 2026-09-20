@@ -61,6 +61,7 @@ async def generate_video(req: VideoGenerateReq, user: dict = Depends(require_aut
             detail={"code": "CHANNEL_NOT_FOUND", "message": str(e)}
         )
 
+@router.get("", include_in_schema=False)
 @router.get("/")
 async def list_videos(channel_id: Optional[str] = Query(None), status: Optional[str] = Query(None), user: dict = Depends(require_auth), service: VideoService = Depends(get_video_service)):
     return await service.list_videos(str(user["_id"]), channel_id, status)

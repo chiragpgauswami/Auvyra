@@ -18,6 +18,7 @@ class PublishingCreateReq(BaseModel):
 def get_publishing_service(db = Depends(get_db)):
     return PublishingService(db)
 
+@router.post("", status_code=status.HTTP_201_CREATED, include_in_schema=False)
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def create_publishing_job(
     req: PublishingCreateReq,
@@ -37,6 +38,7 @@ async def create_publishing_job(
     except ValueError as e:
         raise HTTPException(status_code=400, detail={"code": "BAD_REQUEST", "message": str(e)})
 
+@router.get("", include_in_schema=False)
 @router.get("/")
 async def list_publishing_jobs(
     user: dict = Depends(require_auth),
@@ -44,6 +46,7 @@ async def list_publishing_jobs(
 ):
     return await service.list_publishing_jobs(str(user["_id"]))
 
+@router.get("/calendar/", include_in_schema=False)
 @router.get("/calendar")
 async def get_publishing_calendar(
     user: dict = Depends(require_auth),
@@ -51,6 +54,7 @@ async def get_publishing_calendar(
 ):
     return await service.get_publishing_calendar(str(user["_id"]))
 
+@router.get("/{job_id}/", include_in_schema=False)
 @router.get("/{job_id}")
 async def get_publishing_status(
     job_id: str,
@@ -62,6 +66,7 @@ async def get_publishing_status(
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Job not found"})
     return job
 
+@router.post("/{job_id}/publish/", include_in_schema=False)
 @router.post("/{job_id}/publish")
 async def execute_publish(
     job_id: str,
