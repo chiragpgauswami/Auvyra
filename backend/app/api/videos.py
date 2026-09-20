@@ -7,6 +7,7 @@ from backend.app.services.video_service import VideoService
 from backend.app.storage.local import LocalStorageProvider
 from backend.app.ai.gateway import AIGateway
 from pydantic import BaseModel, Field
+from loguru import logger
 
 router = APIRouter(prefix="/api/videos", tags=["videos"])
 
@@ -263,15 +264,80 @@ async def get_video_thumbnail(
     service: VideoService = Depends(get_video_service),
     auth_service: AuthService = Depends(get_auth_service)
 ):
-    """Retrieve the generated video thumbnail image."""
-    video, _ = await _resolve_and_authorize_video(video_id, request, token, service, auth_service)
+    """Retrieve the generated video thumbnail image with resilient path resolution and on-demand self-healing."""
+    video = await service.video_repo.find_by_id(video_id)
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "VIDEO_NOT_FOUND", "message": f"Video {video_id} not found"}
+        )
+
+    # Validate caller user if auth token provided
+    auth_header = request.headers.get("Authorization")
+    token_str = auth_header.split(" ")[1] if (auth_header and auth_header.startswith("Bearer ")) else token
+    if token_str:
+        try:
+            caller_user = await auth_service.get_current_user(token_str)
+            video_owner_id = video.get("user_id")
+            if video_owner_id and caller_user and str(video_owner_id) != str(caller_user["_id"]):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={"code": "FORBIDDEN", "message": "Access denied"}
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            pass  # Allow graceful rendering of public video thumbnail
+
+    settings = get_settings()
     thumb_path = video.get("thumbnail_path")
-    if not thumb_path or not os.path.exists(thumb_path):
+    resolved_thumb: Optional[str] = None
+
+    if thumb_path:
+        candidates = [thumb_path]
+        if not os.path.isabs(thumb_path):
+            candidates.extend([
+                os.path.abspath(thumb_path),
+                os.path.join(settings.MEDIA_ROOT, thumb_path),
+                os.path.join(os.path.abspath("media"), thumb_path),
+            ])
+        for cand in candidates:
+            if os.path.exists(cand) and os.path.isfile(cand):
+                resolved_thumb = os.path.abspath(cand)
+                break
+
+    # If thumbnail missing from disk but video MP4 exists, extract frame on-demand (self-healing)
+    if not resolved_thumb:
+        file_path = video.get("file_path")
+        if file_path and os.path.exists(file_path):
+            try:
+                from backend.app.services.thumbnail_service import ThumbnailService
+                channel_id = str(video.get("channel_id", "default"))
+                thumb_dir = os.path.join(settings.MEDIA_ROOT, "thumbnails", channel_id)
+                os.makedirs(thumb_dir, exist_ok=True)
+                new_thumb_file = os.path.join(thumb_dir, f"{video_id}.jpg")
+                thumb_service = ThumbnailService(output_dir=thumb_dir)
+                thumb_service.extract_best_frame(file_path, new_thumb_file)
+                if os.path.exists(new_thumb_file):
+                    resolved_thumb = os.path.abspath(new_thumb_file)
+                    await service.video_repo.update_one(
+                        video_id,
+                        {
+                            "thumbnail_path": resolved_thumb,
+                            "thumbnail_url": f"/api/videos/{video_id}/thumbnail"
+                        },
+                        user_id=video.get("user_id")
+                    )
+            except Exception as ex:
+                logger.warning(f"On-demand thumbnail extraction failed for video {video_id}: {ex}")
+
+    if not resolved_thumb or not os.path.exists(resolved_thumb):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "THUMBNAIL_NOT_FOUND", "message": "Thumbnail image not found"}
         )
-    return FileResponse(thumb_path, media_type="image/jpeg", filename=f"{video_id}.jpg")
+
+    return FileResponse(resolved_thumb, media_type="image/jpeg", filename=f"{video_id}.jpg")
 
 @router.delete("/{video_id}")
 async def delete_video(video_id: str, user: dict = Depends(require_auth), service: VideoService = Depends(get_video_service)):

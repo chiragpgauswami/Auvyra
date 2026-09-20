@@ -44,6 +44,7 @@ import { AutopilotWizardModal } from "../components/AutopilotWizardModal";
 import CaptionStyleSelector from "../components/CaptionStyleSelector";
 import StatusBadge from "../components/StatusBadge";
 import { AutopilotQueueSlot, Channel, ChannelBrain, Video } from "../types";
+import { getThumbnailUrl } from "../utils/media";
 
 export const ChannelControlCenter: React.FC = () => {
   const { channelId } = useParams<{ channelId: string }>();
@@ -590,9 +591,15 @@ export const ChannelControlCenter: React.FC = () => {
                   className="group bg-slate-950/80 border border-slate-800 rounded-xl p-3 cursor-pointer hover:border-blue-500/50 transition duration-200"
                 >
                   <div className="relative aspect-[9/16] bg-slate-900 rounded-lg overflow-hidden mb-2">
-                    {v.thumbnail_path ? (
+                    {getThumbnailUrl(v.thumbnail_url, v.thumbnail_path, v.id) ? (
                       <img
-                        src={`/${v.thumbnail_path}`}
+                        src={
+                          getThumbnailUrl(
+                            v.thumbnail_url,
+                            v.thumbnail_path,
+                            v.id
+                          ) || undefined
+                        }
                         alt={v.title}
                         className="w-full h-full object-cover"
                       />

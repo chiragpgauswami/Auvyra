@@ -229,9 +229,11 @@ const Brain = () => {
                 Audience: {brain.target_audience}
               </span>
             </div>
-            <p className="text-sm text-slate-200 font-medium">
-              "{brain.positioning}"
-            </p>
+            {brain.positioning && brain.positioning.trim().length > 0 && (
+              <p className="text-sm text-slate-200 font-medium">
+                "{brain.positioning}"
+              </p>
+            )}
           </div>
 
           {/* Grid: Content Pillars & Winning Hooks */}

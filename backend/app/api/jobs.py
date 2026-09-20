@@ -15,16 +15,6 @@ async def list_jobs(status: Optional[str] = Query(None), user: dict = Depends(re
     jobs = await repo.find_by_user(str(user["_id"]), status=status)
     return serialize_docs(jobs)
 
-@router.get("/{job_id}")
-async def get_job(job_id: str, user: dict = Depends(require_auth), repo: JobRepository = Depends(get_job_repo)):
-    job = await repo.find_by_id(job_id, user_id=str(user["_id"]))
-    if not job:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "JOB_NOT_FOUND", "message": f"Job {job_id} not found or access denied"}
-        )
-    return serialize_doc(job)
-
 @router.get("/active")
 async def get_active_job(user: dict = Depends(require_auth), repo: JobRepository = Depends(get_job_repo)):
     """Fetch the most recent active (queued or processing) job for the user."""
@@ -34,6 +24,16 @@ async def get_active_job(user: dict = Depends(require_auth), repo: JobRepository
     if not active_jobs:
         return {"job": None}
     return {"job": serialize_doc(active_jobs[0])}
+
+@router.get("/{job_id}")
+async def get_job(job_id: str, user: dict = Depends(require_auth), repo: JobRepository = Depends(get_job_repo)):
+    job = await repo.find_by_id(job_id, user_id=str(user["_id"]))
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": f"Job {job_id} not found or access denied"}
+        )
+    return serialize_doc(job)
 
 @router.get("/{job_id}/progress")
 async def get_job_progress(job_id: str, user: dict = Depends(require_auth), repo: JobRepository = Depends(get_job_repo)):

@@ -213,6 +213,10 @@ class ChannelService:
             for p in pillars
         ]
 
+        existing_brain = await self.brain_repo.find_by_channel(channel_id, user_id=user_id)
+        current_pos = existing_brain.get("positioning") if existing_brain else None
+        positioning = current_pos or f"The premier high-retention vertical channel for {chosen_niche}."
+
         brain_payload = {
             "user_id": user_id,
             "channel_id": channel_id,
@@ -221,7 +225,15 @@ class ChannelService:
             "language": config.language,
             "geography": config.target_geography,
             "tone": config.tone,
+            "positioning": positioning,
             "content_pillars": pillar_objects,
+            "winning_topics": existing_brain.get("winning_topics", []) if existing_brain else [],
+            "losing_topics": existing_brain.get("losing_topics", []) if existing_brain else [],
+            "winning_hooks": existing_brain.get("winning_hooks", []) if existing_brain else [],
+            "losing_hooks": existing_brain.get("losing_hooks", []) if existing_brain else [],
+            "winning_title_patterns": existing_brain.get("winning_title_patterns", []) if existing_brain else [],
+            "best_publish_times": existing_brain.get("best_publish_times", []) if existing_brain else [],
+            "learned_rules": existing_brain.get("learned_rules", []) if existing_brain else [],
             "format_strategy": {
                 "format": config.format.value,
                 "aspect_ratio": "9:16" if config.format == ContentFormat.shorts else "16:9",

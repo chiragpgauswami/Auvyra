@@ -23,6 +23,7 @@ import { listVideos } from "../api/videos";
 import Card from "../components/Card";
 import EmptyState from "../components/EmptyState";
 import { Channel, Video } from "../types";
+import { getThumbnailUrl } from "../utils/media";
 
 const Publishing = () => {
   const [activeTab, setActiveTab] = useState<"ready" | "calendar">("ready");
@@ -292,11 +293,11 @@ const Publishing = () => {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {videos.map((vid) => {
-                const thumbSrc =
-                  vid.thumbnail_url ||
-                  (vid.thumbnail_path
-                    ? `/api/videos/${vid.id}/thumbnail${localStorage.getItem("access_token") ? `?token=${encodeURIComponent(localStorage.getItem("access_token") || "")}` : ""}`
-                    : null);
+                const thumbSrc = getThumbnailUrl(
+                  vid.thumbnail_url,
+                  vid.thumbnail_path,
+                  vid.id
+                );
 
                 return (
                   <Card key={vid.id} className="flex flex-col justify-between">
@@ -455,11 +456,11 @@ const Publishing = () => {
                     evt.status === "ready_for_approval" ||
                     evt.approval_status === "ready_for_approval";
 
-                  const thumbSrc =
-                    evt.thumbnail_url ||
-                    (evt.video_id
-                      ? `/api/videos/${evt.video_id}/thumbnail${localStorage.getItem("access_token") ? `?token=${encodeURIComponent(localStorage.getItem("access_token") || "")}` : ""}`
-                      : null);
+                  const thumbSrc = getThumbnailUrl(
+                    evt.thumbnail_url,
+                    null,
+                    evt.video_id
+                  );
 
                   return (
                     <div

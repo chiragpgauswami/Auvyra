@@ -17,6 +17,7 @@ import Card from "../components/Card";
 import ProgressBar from "../components/ProgressBar";
 import StatusBadge from "../components/StatusBadge";
 import { Channel, Job, Video as VideoType } from "../types";
+import { getThumbnailUrl } from "../utils/media";
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -173,12 +174,14 @@ const Dashboard = () => {
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-slate-800 rounded flex items-center justify-center overflow-hidden flex-shrink-0">
-                      {video.thumbnail_url || video.thumbnail_path ? (
+                      {getThumbnailUrl(video.thumbnail_url, video.thumbnail_path, video.id) ? (
                         <img
                           src={
-                            video.thumbnail_url ||
-                            video.thumbnail_path ||
-                            undefined
+                            getThumbnailUrl(
+                              video.thumbnail_url,
+                              video.thumbnail_path,
+                              video.id
+                            ) || undefined
                           }
                           alt={video.title}
                           className="w-full h-full object-cover"

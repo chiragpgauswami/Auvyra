@@ -320,3 +320,92 @@ async def test_autopilot_trigger_endpoint_contract(test_db):
     assert res["title"] == "Quantum AI Secrets"
     mock_service.run_autopilot_cycle.assert_awaited_once_with(user_id=user_id, channel_id=channel_id)
 
+
+@pytest.mark.asyncio
+async def test_jobs_active_endpoint_resolution(test_db):
+    """Verify GET /api/jobs/active does not 404 as dynamic {job_id}."""
+    from httpx import AsyncClient, ASGITransport
+    from backend.app.main import app
+    from backend.app.config import get_settings
+    from backend.app.auth.service import AuthService
+    from backend.app.repositories.jobs import JobRepository
+
+    settings = get_settings()
+    auth_svc = AuthService(test_db, settings)
+    job_repo = JobRepository(test_db)
+
+    user_id = str(ObjectId())
+    await test_db["users"].insert_one({
+        "_id": ObjectId(user_id),
+        "email": "active_test@example.com",
+        "name": "Active Test User",
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc)
+    })
+    token = auth_svc.create_access_token(user_id)
+
+    # 1. When no active job exists
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res = await client.get("/api/jobs/active", headers={"Authorization": f"Bearer {token}"})
+        assert res.status_code == 200
+        assert res.json() == {"job": None}
+
+        # 2. When active processing job exists
+        job_id = await job_repo.enqueue(
+            job_type="video_generation",
+            user_id=user_id,
+            payload={"topic": "Black Holes"}
+        )
+        await job_repo.update_progress(job_id, 45, stage="generating_narration", status="processing")
+
+        res2 = await client.get("/api/jobs/active", headers={"Authorization": f"Bearer {token}"})
+        assert res2.status_code == 200
+        data = res2.json()
+        assert data["job"] is not None
+        assert data["job"]["status"] == "processing"
+
+
+@pytest.mark.asyncio
+async def test_channel_brain_positioning_persisted(test_db):
+    """Verify autopilot config preserves and stores channel positioning."""
+    from backend.app.services.channel_service import ChannelService
+
+    user_id = str(ObjectId())
+    ch_id = str(ObjectId())
+
+    # Insert channel
+    await test_db["channels"].insert_one({
+        "_id": ObjectId(ch_id),
+        "user_id": user_id,
+        "name": "Apex Wildlife",
+        "status": "connected"
+    })
+
+    svc = ChannelService(test_db)
+    config_data = {
+        "mode": "full_autopilot",
+        "niche": "Apex Wildlife",
+        "target_audience": "Wildlife Enthusiasts",
+        "content_pillars": ["Big Cats", "Ocean Predators"],
+        "format": "shorts",
+        "schedule": {
+            "frequency_per_week": 7,
+            "days_of_week": [0, 1, 2, 3, 4, 5, 6],
+            "times": ["18:00"],
+            "timezone": "UTC"
+        },
+        "tone": "cinematic"
+    }
+
+    result = await svc.configure_autopilot(user_id, ch_id, config_data)
+    assert result is not None
+
+    # Verify brain in DB has non-empty positioning
+    brain = await test_db["channel_brains"].find_one({"channel_id": ch_id})
+    assert brain is not None
+    assert "positioning" in brain
+    assert len(brain["positioning"]) > 0
+    assert "Apex Wildlife" in brain["positioning"]
+
+

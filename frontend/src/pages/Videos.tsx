@@ -5,6 +5,7 @@ import { listVideos } from "../api/videos";
 import Card from "../components/Card";
 import StatusBadge from "../components/StatusBadge";
 import { Channel, Video } from "../types";
+import { getThumbnailUrl } from "../utils/media";
 
 const Videos = () => {
   const [videos, setVideos] = useState<Video[]>([]);
@@ -107,11 +108,11 @@ const Videos = () => {
               </thead>
               <tbody className="divide-y divide-slate-800">
                 {videos.map((video) => {
-                  const thumbSrc =
-                    video.thumbnail_url ||
-                    (video.thumbnail_path
-                      ? `/api/videos/${video.id}/thumbnail${localStorage.getItem("access_token") ? `?token=${encodeURIComponent(localStorage.getItem("access_token") || "")}` : ""}`
-                      : null);
+                  const thumbSrc = getThumbnailUrl(
+                    video.thumbnail_url,
+                    video.thumbnail_path,
+                    video.id
+                  );
 
                   return (
                     <tr
